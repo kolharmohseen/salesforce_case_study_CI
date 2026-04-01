@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design Document — Tying Product Usage to Competitive Loss</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+  pre, code { font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace; }
+  pre { background: #1e1e2e; color: #cdd6f4; padding: 20px 24px; border-radius: 10px; overflow-x: auto; font-size: 13px; line-height: 1.7; }
+  pre .kw { color: #cba6f7; } pre .fn { color: #89b4fa; } pre .str { color: #a6e3a1; } pre .cm { color: #6c7086; font-style: italic; } pre .num { color: #fab387; }
+  @media print { body { background: white !important; } section { break-inside: avoid; } }
+</style>
+</head>
+<body class="bg-white text-slate-800 leading-relaxed">
+<div class="max-w-4xl mx-auto px-8 py-12">
+
+  <!-- ─── HEADER ─── -->
+  <header class="mb-16">
+    <div class="inline-block px-3 py-1 rounded-md text-xs font-semibold tracking-wider uppercase mb-6 bg-slate-100 text-slate-600 border border-slate-200">
+      Data Engineering Design Document &middot; Draft
+    </div>
+    <h1 class="text-4xl font-bold text-slate-900 leading-tight mb-4">
+      Tying Product Usage to Competitive Loss
+    </h1>
+    <p class="text-lg text-slate-500 max-w-2xl mb-6">
+      Pipeline to join Salesforce deal outcomes with product usage data, enrich with derived metrics, and deliver competitive intelligence to four consumer channels.
+    </p>
+    <div class="flex gap-6 text-sm text-slate-400">
+      <span>Mohseen Kolhar</span>
+      <span class="text-slate-300">|</span>
+      <span>Data Engineer, Competitive Intelligence</span>
+      <span class="text-slate-300">|</span>
+      <span>April 2026</span>
+    </div>
+    <div class="h-px bg-slate-200 mt-8"></div>
+  </header>
+
+  <!-- ─── TOC ─── -->
+  <nav class="mb-16">
+    <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">Contents</h2>
+    <div class="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+      <a href="#scope" class="text-slate-600 hover:text-slate-900">1. Problem &amp; Scope</a>
+      <a href="#metrics" class="text-slate-600 hover:text-slate-900">7. Metric Lineage &amp; Calculations</a>
+      <a href="#assumptions" class="text-slate-600 hover:text-slate-900">2. What We Know vs What We&rsquo;re Assuming</a>
+      <a href="#schema" class="text-slate-600 hover:text-slate-900">8. Output Schema</a>
+      <a href="#sources" class="text-slate-600 hover:text-slate-900">3. Source Data Model</a>
+      <a href="#risks" class="text-slate-600 hover:text-slate-900">9. Risks &amp; Failure Modes</a>
+      <a href="#decisions" class="text-slate-600 hover:text-slate-900">4. Design Decisions &amp; Tradeoffs</a>
+      <a href="#delivery" class="text-slate-600 hover:text-slate-900">10. Delivery &amp; Roadmap</a>
+      <a href="#architecture" class="text-slate-600 hover:text-slate-900">5. Pipeline Architecture</a>
+      <a href="#integrity" class="text-slate-600 hover:text-slate-900">6. Data Integrity &amp; QA</a>
+    </div>
+  </nav>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 1. PROBLEM & SCOPE                      -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="scope" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">01</span> Problem &amp; Scope</h2>
+
+    <p class="text-slate-700 mb-6">When a deal is lost to a competitor, did the customer already have low usage of existing products? This pipeline joins deal outcomes with product usage data to answer that question &mdash; and to identify accounts heading the same direction before they churn.</p>
+
+    <div class="grid grid-cols-2 gap-6">
+      <div>
+        <h3 class="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">In Scope</h3>
+        <ul class="text-sm text-slate-600 space-y-2">
+          <li><strong class="text-slate-800">Closed Lost deals</strong> with competitor attribution (junction object)</li>
+          <li><strong class="text-slate-800">Product usage at close date</strong> &mdash; point-in-time, not current state</li>
+          <li><strong class="text-slate-800">Competitor win/loss analysis</strong> from CI_Opportunity_Competitor</li>
+          <li><strong class="text-slate-800">Usage trend</strong> (12-month lookback from close date)</li>
+          <li><strong class="text-slate-800">Loss reason classification</strong> from Competitive_Notes free text</li>
+          <li><strong class="text-slate-800">At-risk identification</strong> on retained accounts matching the loss pattern</li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Out of Scope (V1)</h3>
+        <ul class="text-sm text-slate-600 space-y-2">
+          <li><strong class="text-slate-800">Win analysis</strong> &mdash; V1 focuses on losses. Win patterns are a separate pipeline.</li>
+          <li><strong class="text-slate-800">Product telemetry beyond CRM</strong> &mdash; no Mixpanel/Amplitude/Pendo integration</li>
+          <li><strong class="text-slate-800">Real-time alerting</strong> &mdash; V1 is daily batch. Streaming is V2+.</li>
+          <li><strong class="text-slate-800">Battlecard content generation</strong> &mdash; feedback loop is V2. V1 surfaces the data.</li>
+          <li><strong class="text-slate-800">Predictive modeling</strong> &mdash; V1 is descriptive + diagnostic. ML is V3.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 2. WHAT WE KNOW VS WHAT WE'RE ASSUMING -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="assumptions" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">02</span> What We Know vs What We&rsquo;re Assuming</h2>
+
+    <p class="text-slate-600 mb-6">This section is the most important part of this document. Every architectural decision below rests on these foundations. Items marked <span class="px-1.5 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">ASSUMED</span> must be validated before build begins.</p>
+
+    <div class="rounded-xl border border-slate-200 overflow-hidden mb-8">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b-2 border-slate-200 bg-slate-50">
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider w-1/4">Area</th>
+          <th class="text-left p-3 text-xs font-semibold uppercase tracking-wider w-[38%]" style="color:#2e844a">Confirmed</th>
+          <th class="text-left p-3 text-xs font-semibold text-red-600 uppercase tracking-wider w-[38%]">Assumed &mdash; Validate Day 1</th>
+        </tr></thead>
+        <tbody class="text-slate-600">
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">Tech stack</td>
+            <td class="p-3">Salesforce &rarr; Azure &rarr; Airflow &rarr; Snowflake &rarr; Tableau. Confirmed by recruiter with architecture screenshots.</td>
+            <td class="p-3">Airflow version, DAG scheduling frequency, Snowflake warehouse sizing. We haven&rsquo;t seen the Airflow UI.</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">Competitor data</td>
+            <td class="p-3">Junction object CI_Opportunity_Competitor exists (2.3M records). Competitor required at Stage 3. CI_Competitor catalog has 908 records. Competitive_Notes is Long Text 4000.</td>
+            <td class="p-3">Fill rate on Competitive_Notes (required &ne; populated &mdash; reps can save empty). Accuracy of Leading flag (manual AE update, could be stale). Whether 908 catalog entries are deduplicated (likely not &mdash; &ldquo;Oracle&rdquo; vs &ldquo;Oracle Cloud&rdquo;).</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">Usage data</td>
+            <td class="p-3">Usage derives from Account &rarr; Asset Line Items (Apttus CPQ) &rarr; child usage records. This is the confirmed path.</td>
+            <td class="p-3 text-red-700 font-medium">We have NOT seen the actual asset hierarchy. We don&rsquo;t know: which fields track usage events, whether feature-level adoption is tracked, whether daily snapshots exist or need to be built. This is the biggest risk.</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">Historical data</td>
+            <td class="p-3">Deal data goes back years (standard SF Opportunity). 2-year lookback is feasible.</td>
+            <td class="p-3">Whether usage snapshots exist historically or only from when we build them. If no snapshots exist, we lose all historical trend analysis &mdash; the pipeline only has forward-looking precision.</td>
+          </tr>
+          <tr>
+            <td class="p-3 font-semibold text-slate-800">Data volumes</td>
+            <td class="p-3">2.3M junction records (confirmed from object metadata).</td>
+            <td class="p-3">Opportunity volume (likely 500K&ndash;2M total, ~50K&ndash;100K Closed Lost). Usage record volume completely unknown &mdash; could be 10M or 500M depending on event granularity.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Open Questions That Affect Architecture</h3>
+    <div class="rounded-xl border border-slate-200 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b-2 border-slate-200 bg-slate-50">
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Question</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Impact If Answer Is &ldquo;No&rdquo;</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">When To Resolve</th>
+        </tr></thead>
+        <tbody class="text-slate-600">
+          <tr class="border-b border-slate-100">
+            <td class="p-3">Do daily usage snapshots already exist in Snowflake?</td>
+            <td class="p-3 text-red-600 font-medium">Must build SCD Type 2 from scratch. Lose all historical trend data before build date.</td>
+            <td class="p-3 font-semibold">Week 1</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3">Are feature-level adoption events tracked (not just logins)?</td>
+            <td class="p-3 text-amber-600">Usage Score collapses from 3-factor to 2-factor model. Thresholds shift.</td>
+            <td class="p-3 font-semibold">Week 1</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3">What % of Competitive_Notes are actually populated with useful text?</td>
+            <td class="p-3 text-amber-600">Loss reason classification has no input. Fall back to primary loss reason picklist (less granular).</td>
+            <td class="p-3 font-semibold">Week 2</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3">Is renewal date available on Opportunity or Contract?</td>
+            <td class="p-3">Cannot compute Days_To_Renewal. Risk Flag loses a dimension. Must derive from contract end dates.</td>
+            <td class="p-3 font-semibold">Week 1</td>
+          </tr>
+          <tr>
+            <td class="p-3">How many of the 908 competitor catalog entries are duplicates?</td>
+            <td class="p-3">Competitor win rates are inflated/split. Need entity resolution before scorecard is accurate.</td>
+            <td class="p-3 font-semibold">Week 2</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 3. SOURCE DATA MODEL                    -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="sources" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">03</span> Source Data Model</h2>
+
+    <!-- Opportunity -->
+    <div class="mb-6 rounded-xl border border-slate-200 overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between" style="background-color:rgba(1,118,211,0.05)">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-bold" style="color:#0176d3">Opportunity</span>
+          <span class="text-xs text-slate-400">Standard Object</span>
+        </div>
+        <span class="text-xs text-slate-400">Est. 500K&ndash;2M total &middot; ~50K&ndash;100K Closed Lost</span>
+      </div>
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-slate-100 bg-slate-50">
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Field</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Notes</th>
+        </tr></thead>
+        <tbody class="text-slate-600">
+          <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Stage</td><td class="p-3">Picklist</td><td class="p-3">Filter: <code class="text-xs bg-slate-100 px-1 rounded text-red-600">Closed Lost</code>. Dropdown &mdash; not free text.</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Amount</td><td class="p-3">Currency</td><td class="p-3">ARR at risk. Can be $0 on some deals &mdash; needs range validation.</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Close_Date</td><td class="p-3">Date</td><td class="p-3">Anchor for point-in-time join. Assumed accurate (system-set on stage change).</td></tr>
+          <tr><td class="p-3 font-mono text-xs font-semibold text-amber-600">Account_ID</td><td class="p-3">Lookup</td><td class="p-3 font-semibold text-amber-600">Join key to Account. 15 or 18-char SF ID &mdash; must normalize.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Junction -->
+    <div class="mb-6 rounded-xl border border-slate-200 overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between" style="background-color:rgba(124,58,237,0.05)">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-bold" style="color:#7c3aed">CI_Opportunity_Competitor</span>
+          <span class="text-xs text-slate-400">Junction Object</span>
+        </div>
+        <span class="text-xs text-slate-400">2.3M records (confirmed)</span>
+      </div>
+      <table class="w-full text-sm">
+        <thead><tr class="border-b border-slate-100 bg-slate-50">
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Field</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Notes &amp; Data Quality Concerns</th>
+        </tr></thead>
+        <tbody class="text-slate-600">
+          <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Competitor</td><td class="p-3">Master-Detail</td><td class="p-3">Links to 908-record catalog. Catalog likely has duplicates (&ldquo;Oracle&rdquo; vs &ldquo;Oracle Cloud&rdquo;) &mdash; entity resolution needed.</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Opportunity</td><td class="p-3">Master-Detail</td><td class="p-3">One deal &rarr; many competitors (average 2&ndash;3 per evaluation).</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Incumbent</td><td class="p-3">Checkbox</td><td class="p-3">Is this the customer&rsquo;s current provider? Fill rate unknown.</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-red-600">Leading</td><td class="p-3">Checkbox</td><td class="p-3 text-red-600">Who won. <strong>Manual AE update &mdash; accuracy unknown.</strong> Could be stale if AE didn&rsquo;t update post-close.</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Competitive_Notes</td><td class="p-3">Long Text 4000</td><td class="p-3">Unstructured signal. <strong>Required &ne; populated.</strong> Fill rate with useful text is unknown &mdash; could be 30% or 80%.</td></tr>
+          <tr><td class="p-3 font-mono text-xs font-semibold text-slate-800">Win_Loss_Call_Candidate</td><td class="p-3">Flag</td><td class="p-3">For post-deal debrief. Informational only.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Account + Usage -->
+    <div class="mb-6 rounded-xl border border-slate-200 overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-200 flex items-center justify-between" style="background-color:rgba(245,158,11,0.05)">
+        <div class="flex items-center gap-3">
+          <span class="text-sm font-bold text-amber-600">Account &rarr; Asset Line Items &rarr; Usage Records</span>
+        </div>
+        <span class="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">NOT YET MAPPED</span>
+      </div>
+      <div class="p-5">
+        <p class="text-sm text-slate-600 mb-3">We know the derivation <em>path</em> (Account &rarr; Asset Line Items via Apttus CPQ &rarr; child usage objects) but we have <strong class="text-red-600">not seen the actual fields</strong>. The table below is our <em>proposed</em> derivation. Every row needs validation against the actual Snowflake schema.</p>
+        <table class="w-full text-sm mt-3">
+          <thead><tr class="border-b border-slate-100 bg-slate-50">
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Proposed Field</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Proposed Derivation</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Confidence</th>
+          </tr></thead>
+          <tbody class="text-slate-600">
+            <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Licensed_Seats</td><td class="p-3 font-mono text-xs">MAX(asset_line_item.quantity)</td><td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span> &mdash; assumes quantity = seat count</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Active_Users</td><td class="p-3 font-mono text-xs">COUNT(DISTINCT usage.user_id)</td><td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span> &mdash; assumes user_id field exists on usage records</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-mono text-xs font-semibold text-slate-800">Feature_Adoption</td><td class="p-3 font-mono text-xs">COUNT(DISTINCT user_id WHERE feature IN (core_list))</td><td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">LOW</span> &mdash; may not exist. If not, Usage Score becomes 2-factor.</td></tr>
+            <tr><td class="p-3 font-mono text-xs font-semibold text-slate-800">Last_Active</td><td class="p-3 font-mono text-xs">MAX(usage.event_ts)</td><td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span> &mdash; assumes event_ts exists and is populated</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Relationships -->
+    <h3 class="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Relationships</h3>
+    <div class="p-5 rounded-xl bg-slate-50 border border-slate-200 font-mono text-sm text-slate-600">
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-semibold" style="color:#0176d3">Opportunity</span>
+        <span class="text-slate-400">1:N &rarr;</span>
+        <span class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-semibold" style="color:#7c3aed">CI_Opp_Competitor</span>
+        <span class="text-slate-400">N:1 &rarr;</span>
+        <span class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-semibold" style="color:#7c3aed">CI_Competitor (908)</span>
+      </div>
+      <div class="flex items-center gap-3 flex-wrap mt-3">
+        <span class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-semibold" style="color:#0176d3">Opportunity</span>
+        <span class="text-slate-400">N:1 &rarr;</span>
+        <span class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-semibold text-amber-600">Account</span>
+        <span class="text-slate-400">1:N &rarr;</span>
+        <span class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-semibold text-amber-600">Asset Lines</span>
+        <span class="text-slate-400">1:N &rarr;</span>
+        <span class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-semibold text-amber-600">Usage Records</span>
+      </div>
+      <p class="text-xs text-slate-400 mt-4 font-sans">Join key: <strong class="text-amber-600">Account_ID</strong> &middot; One account &rarr; many Opps (renewals, upsells) &middot; One deal &rarr; multiple competitors &middot; Output grain: one row per deal-competitor pair</p>
+    </div>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 4. DESIGN DECISIONS & TRADEOFFS         -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="decisions" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">04</span> Design Decisions &amp; Tradeoffs</h2>
+
+    <p class="text-slate-600 mb-6">Every decision below has alternatives. These are choices, not defaults. If the team has different priorities, the architecture accommodates them because these decisions are localized, not baked into the foundation.</p>
+
+    <div class="space-y-6">
+
+      <!-- D1 -->
+      <div class="p-5 rounded-xl border border-slate-200" style="border-left:3px solid #f59e0b">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-slate-900">D1. Point-in-Time Join vs Current State</h3>
+          <span class="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">CRITICAL</span>
+        </div>
+        <div class="rounded-lg border border-slate-200 overflow-hidden text-sm mb-3">
+          <table class="w-full">
+            <tbody>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500 w-28">Option A</td><td class="p-3 text-slate-600"><strong>Join to current usage.</strong> Simplest. No snapshots needed. But every churned account shows 0% usage &mdash; you learn nothing about what usage looked like when the deal was active.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Option B</td><td class="p-3 text-slate-600"><strong>Join to usage as of close date (SCD Type 2).</strong> Requires daily snapshots. Captures the actual state when the decision was made. Reveals patterns invisible in current state.</td></tr>
+              <tr class="border-b border-slate-100 bg-amber-50"><td class="p-3 font-semibold text-amber-700">Chosen</td><td class="p-3 text-slate-800 font-medium">Option B. Without historical state, the analysis is meaningless. This is the entire value proposition.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Cost</td><td class="p-3 text-slate-600">Must build and maintain SCD Type 2 snapshots. ~365 rows per account per year. If snapshots don&rsquo;t exist historically, we only have precision from the day we start building them.</td></tr>
+              <tr><td class="p-3 font-semibold text-slate-500">Reversible?</td><td class="p-3 text-slate-600">Yes &mdash; can always fall back to Option A by removing the date filter. But we can&rsquo;t go back to B from A (lost data).</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- D2 -->
+      <div class="p-5 rounded-xl border border-slate-200" style="border-left:3px solid #0176d3">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-slate-900">D2. LEFT JOIN vs INNER JOIN</h3>
+          <span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">IMPORTANT</span>
+        </div>
+        <div class="rounded-lg border border-slate-200 overflow-hidden text-sm mb-3">
+          <table class="w-full">
+            <tbody>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500 w-28">Option A</td><td class="p-3 text-slate-600"><strong>INNER JOIN.</strong> Only include deals where usage data exists. Cleaner dataset. But silently drops deals where usage tracking wasn&rsquo;t configured &mdash; biases analysis toward already-monitored accounts.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Option B</td><td class="p-3 text-slate-600"><strong>LEFT JOIN.</strong> Keep ALL lost deals. NULL usage = tracking not configured = itself a blind spot signal worth surfacing.</td></tr>
+              <tr class="border-b border-slate-100 bg-blue-50"><td class="p-3 font-semibold" style="color:#0176d3">Chosen</td><td class="p-3 text-slate-800 font-medium">Option B. The accounts we can&rsquo;t see are often the ones most at risk. NULLs are data.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Cost</td><td class="p-3 text-slate-600">Downstream consumers must handle NULLs. Every metric calculation needs COALESCE or explicit NULL logic. Dashboard must display &ldquo;No usage data&rdquo; states.</td></tr>
+              <tr><td class="p-3 font-semibold text-slate-500">Reversible?</td><td class="p-3 text-slate-600">Yes &mdash; add WHERE clause to filter NULLs. No data loss.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- D3 -->
+      <div class="p-5 rounded-xl border border-slate-200" style="border-left:3px solid #7c3aed">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-slate-900">D3. Snapshot Grain: Daily vs Monthly</h3>
+        </div>
+        <div class="rounded-lg border border-slate-200 overflow-hidden text-sm mb-3">
+          <table class="w-full">
+            <tbody>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500 w-28">Option A</td><td class="p-3 text-slate-600"><strong>Daily snapshots.</strong> Most precise point-in-time join. Storage: ~365 rows &times; accounts/year.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Option B</td><td class="p-3 text-slate-600"><strong>Monthly averages.</strong> 12&times; smaller. But a deal that closed on the 5th gets the full-month average &mdash; could be misleading if usage dropped mid-month.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Option C</td><td class="p-3 text-slate-600"><strong>Single row per account.</strong> Simplest join. Loses time dimension entirely. Useless for trend analysis.</td></tr>
+              <tr class="border-b border-slate-100" style="background-color:rgba(124,58,237,0.05)"><td class="p-3 font-semibold" style="color:#7c3aed">Chosen</td><td class="p-3 text-slate-800 font-medium">Option A for the join table (precision). Pre-aggregated monthly summaries for the dashboard (performance).</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Cost</td><td class="p-3 text-slate-600">Larger table. If 100K accounts &times; 730 days (2yr) = ~73M rows. Manageable for Snowflake but needs partitioning on Snapshot_Date.</td></tr>
+              <tr><td class="p-3 font-semibold text-slate-500">Reversible?</td><td class="p-3 text-slate-600">Can always aggregate daily &rarr; monthly. Cannot disaggregate monthly &rarr; daily.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- D4 -->
+      <div class="p-5 rounded-xl border border-slate-200" style="border-left:3px solid #dc2626">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-slate-900">D4. Quality Gate: Hard Block vs Soft Warn</h3>
+        </div>
+        <div class="rounded-lg border border-slate-200 overflow-hidden text-sm mb-3">
+          <table class="w-full">
+            <tbody>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500 w-28">Option A</td><td class="p-3 text-slate-600"><strong>Hard block.</strong> If critical QA check fails, pipeline stops. Serve stale data. Alert team.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Option B</td><td class="p-3 text-slate-600"><strong>Soft warn.</strong> Always refresh. Flag issues in metadata. Risk: bad data reaches dashboard before anyone notices.</td></tr>
+              <tr class="border-b border-slate-100 bg-red-50"><td class="p-3 font-semibold text-red-700">Chosen</td><td class="p-3 text-slate-800 font-medium">Option A for schema validation and uniqueness (hard block). Option B for completeness and format checks (warn, proceed). Bad data in a dashboard is worse than stale data.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Cost</td><td class="p-3 text-slate-600">Dashboard may show stale data during outages. Requires &ldquo;Last refreshed&rdquo; timestamp visible to users. Ops team needs alerting channel.</td></tr>
+              <tr><td class="p-3 font-semibold text-slate-500">Reversible?</td><td class="p-3 text-slate-600">Yes &mdash; change a config flag per check.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- D5 -->
+      <div class="p-5 rounded-xl border border-slate-200" style="border-left:3px solid #2e844a">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-slate-900">D5. Loss Reason Extraction</h3>
+        </div>
+        <div class="rounded-lg border border-slate-200 overflow-hidden text-sm mb-3">
+          <table class="w-full">
+            <tbody>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500 w-28">Option A</td><td class="p-3 text-slate-600"><strong>LLM / zero-shot classification on Competitive_Notes.</strong> Automated. Scales. But accuracy is unknown until tested on real data. Could produce garbage on short or vague notes.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Option B</td><td class="p-3 text-slate-600"><strong>Use existing Primary Loss Reason picklist.</strong> Already there. But Rob said it&rsquo;s not granular enough for CI analysis.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Option C</td><td class="p-3 text-slate-600"><strong>Hybrid: use picklist as baseline, LLM as enrichment.</strong> Picklist value always present. LLM adds granularity where notes exist. Human review on low-confidence classifications.</td></tr>
+              <tr class="border-b border-slate-100" style="background-color:rgba(46,132,74,0.05)"><td class="p-3 font-semibold" style="color:#2e844a">Chosen</td><td class="p-3 text-slate-800 font-medium">Option C. Ship with picklist (reliable). Add LLM classification as a second column. Don&rsquo;t replace the source data &mdash; augment it.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Cost</td><td class="p-3 text-slate-600">Two columns to maintain. LLM inference cost per run. Need accuracy baseline before trusting automated output.</td></tr>
+              <tr><td class="p-3 font-semibold text-slate-500">Reversible?</td><td class="p-3 text-slate-600">Yes &mdash; LLM column is additive. Can drop it without affecting core pipeline.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- D6 -->
+      <div class="p-5 rounded-xl border border-slate-200" style="border-left:3px solid #64748b">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-slate-900">D6. Ingestion Frequency</h3>
+        </div>
+        <div class="rounded-lg border border-slate-200 overflow-hidden text-sm mb-3">
+          <table class="w-full">
+            <tbody>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500 w-28">Option A</td><td class="p-3 text-slate-600"><strong>Daily batch from Snowflake.</strong> Simple. Data already lands there. Latency: ~24hr worst case.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Option B</td><td class="p-3 text-slate-600"><strong>CDC (Change Data Capture) for Opportunities.</strong> Near-real-time on deal closes. More complex. Deals close in bursts (quarter-end), not steadily.</td></tr>
+              <tr class="border-b border-slate-100 bg-slate-50"><td class="p-3 font-semibold text-slate-700">Chosen</td><td class="p-3 text-slate-800 font-medium">Option A for V1. Deal outcomes don&rsquo;t change after close. Usage shifts slowly. Daily batch is 10&times; simpler and sufficient for weekly/monthly CI analysis. CDC is V2 if latency becomes a business problem.</td></tr>
+              <tr><td class="p-3 font-semibold text-slate-500">Cost</td><td class="p-3 text-slate-600">Dashboard is always ~24hr behind. Acceptable for strategic CI work. Not acceptable for real-time CS triggers (V2 problem).</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- D7 -->
+      <div class="p-5 rounded-xl border border-slate-200" style="border-left:3px solid #64748b">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-bold text-slate-900">D7. Multi-Competitor Attribution</h3>
+        </div>
+        <div class="rounded-lg border border-slate-200 overflow-hidden text-sm mb-3">
+          <table class="w-full">
+            <tbody>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500 w-28">Option A</td><td class="p-3 text-slate-600"><strong>Keep only Leading competitor.</strong> Cleaner: one row per deal. But loses context &mdash; you don&rsquo;t know who else was in the evaluation.</td></tr>
+              <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-500">Option B</td><td class="p-3 text-slate-600"><strong>Keep all competitors per deal.</strong> Grain: one row per deal-competitor. Deal Amount appears on multiple rows &mdash; must deduplicate in aggregations (SUM Amount WHERE Leading = TRUE).</td></tr>
+              <tr class="border-b border-slate-100 bg-slate-50"><td class="p-3 font-semibold text-slate-700">Chosen</td><td class="p-3 text-slate-800 font-medium">Option B. Richer analysis. Use Leading flag to filter for winner in aggregations. The non-leading competitors tell you who was considered &mdash; valuable for competitive landscape mapping.</td></tr>
+              <tr><td class="p-3 font-semibold text-slate-500">Cost</td><td class="p-3 text-slate-600">Every aggregate query must filter on Leading = TRUE to avoid double-counting deal amounts. Documentation critical. Easy to get wrong.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 5. PIPELINE ARCHITECTURE                -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="architecture" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">05</span> Pipeline Architecture</h2>
+
+    <div class="flex items-center gap-2 mb-6 flex-wrap">
+      <span class="px-4 py-2 rounded-lg text-xs font-bold text-white" style="background-color:#0176d3">1. Extract</span>
+      <span class="text-slate-300 font-bold">&rarr;</span>
+      <span class="px-4 py-2 rounded-lg text-xs font-bold text-white bg-red-500">2. QA</span>
+      <span class="text-slate-300 font-bold">&rarr;</span>
+      <span class="px-4 py-2 rounded-lg text-xs font-bold text-white bg-amber-500">3. Join</span>
+      <span class="text-slate-300 font-bold">&rarr;</span>
+      <span class="px-4 py-2 rounded-lg text-xs font-bold text-white" style="background-color:#7c3aed">4. Enrich</span>
+      <span class="text-slate-300 font-bold">&rarr;</span>
+      <span class="px-4 py-2 rounded-lg text-xs font-bold text-white" style="background-color:#2e844a">5. Deliver</span>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 overflow-hidden mb-6">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b-2 border-slate-200 bg-slate-50">
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Step</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">What It Does</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">On Failure</th>
+        </tr></thead>
+        <tbody class="text-slate-600">
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">1. Extract</td>
+            <td class="p-3">Daily query from Snowflake. Pull Opportunities (Closed Lost, 2yr), junction records, usage snapshots. Store as raw immutable tables.</td>
+            <td class="p-3 text-red-600">If upstream SF &rarr; Snowflake extract is delayed, entire pipeline waits. Alert on SLA breach (&gt;2hr past scheduled time). Serve stale data.</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">2. QA</td>
+            <td class="p-3">6-check validation layer (see <a href="#integrity" class="font-semibold" style="color:#0176d3">Section 6</a>). Quality gate on critical checks.</td>
+            <td class="p-3 text-red-600">Critical fail: block load, serve last good, page on-call. Soft fail: log, flag rows, proceed.</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">3. Join</td>
+            <td class="p-3">LEFT JOIN Opportunity &rarr; Junction &rarr; Usage Snapshots. Point-in-time on Close_Date. Output: one row per deal-competitor.</td>
+            <td class="p-3 text-red-600">If snapshot table is empty (first run or backfill failure), all usage columns are NULL. Pipeline proceeds but dashboard shows &ldquo;No usage data&rdquo; for every account. Detectable via completeness check.</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">4. Enrich</td>
+            <td class="p-3">Derive: Usage_Score, Usage_Tier, Days_Inactive, Risk_Flag, Usage_Trend, Loss_Reason_Classified.</td>
+            <td class="p-3 text-red-600">If LLM service is down, Loss_Reason_Classified is NULL &mdash; fall back to primary picklist. All other metrics are pure SQL, no external dependency.</td>
+          </tr>
+          <tr>
+            <td class="p-3 font-semibold text-slate-800">5. Deliver</td>
+            <td class="p-3">Write to <code class="text-xs">competitive_deal_outcomes</code>. Trigger Tableau extract refresh. Slack digest job. CS alert evaluation.</td>
+            <td class="p-3 text-red-600">If Tableau refresh fails, users see stale dashboard with &ldquo;Last refreshed&rdquo; timestamp. Slack digest skips if source table is stale (&gt;48hr).</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="p-4 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-600">
+      <strong class="text-slate-800">SLA target:</strong> &lt;1 hour from Snowflake extract completion to dashboard refresh. <strong class="text-red-600">Caveat:</strong> this assumes the upstream SF &rarr; Azure &rarr; Snowflake extract completes on schedule. We don&rsquo;t control that pipeline. If upstream is delayed, our SLA breaks. Need to negotiate upstream SLA separately.
+    </div>
+
+    <div class="mt-4 p-4 rounded-lg border border-slate-200 text-sm text-slate-600">
+      <strong class="text-slate-800">Security (embedded in pipeline):</strong> PII encrypted at rest (Competitive_Notes may contain customer names). Role-based access: CI team sees all, CS sees their accounts, Execs see aggregates. Audit log on every extraction. Minimum-permission service accounts for Airflow jobs.
+    </div>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 6. DATA INTEGRITY & QA                  -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="integrity" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">06</span> Data Integrity &amp; QA</h2>
+
+    <div class="rounded-xl border border-slate-200 overflow-hidden mb-6">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b-2 border-slate-200 bg-slate-50">
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Check</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Validates</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">On Fail</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Expected Failure Rate</th>
+        </tr></thead>
+        <tbody class="text-slate-600">
+          <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-800">Schema validation</td><td class="p-3">Expected columns exist, types correct</td><td class="p-3 font-bold text-red-600">Hard block</td><td class="p-3 text-slate-400">~0% (only on upstream schema change)</td></tr>
+          <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-800">Completeness</td><td class="p-3">Junction record exists for each Closed Lost deal</td><td class="p-3">Log rate, flag, proceed</td><td class="p-3 text-amber-600 font-medium">5&ndash;15% &mdash; validation rules can be bypassed by admins</td></tr>
+          <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-800">Usage derivation</td><td class="p-3">Asset hierarchy present? Composite in range [0, 1]?</td><td class="p-3 text-amber-600">NULL missing, log</td><td class="p-3 text-red-600 font-medium">Unknown &mdash; depends on asset coverage</td></tr>
+          <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-800">Uniqueness</td><td class="p-3">Each Opportunity_ID unique per extract</td><td class="p-3 font-bold text-red-600">Dedup (keep latest ts)</td><td class="p-3 text-amber-600 font-medium">2&ndash;5% from CDC duplicate events</td></tr>
+          <tr class="border-b border-slate-100"><td class="p-3 font-semibold text-slate-800">Referential integrity</td><td class="p-3">Account_ID in Opp exists in Account table</td><td class="p-3">Log orphans, keep but flag</td><td class="p-3 text-slate-400">&lt;1% (SF enforces this)</td></tr>
+          <tr><td class="p-3 font-semibold text-slate-800">ID format</td><td class="p-3">Account_ID consistent (15 vs 18-char SF ID)</td><td class="p-3">Normalize to 18-char</td><td class="p-3 text-amber-600 font-medium">10&ndash;20% from cross-system sources</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="p-4 rounded-lg bg-red-50 border border-red-200 text-sm">
+      <strong class="text-red-700">Quality Gate:</strong> <span class="text-slate-700">If schema validation or uniqueness check fails, pipeline stops. All other checks log and proceed. Every run&rsquo;s QA results are persisted to a <code class="text-xs">pipeline_qa_log</code> table for retrospective analysis and trend monitoring.</span>
+    </div>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 7. METRIC LINEAGE & CALCULATIONS        -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="metrics" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">07</span> Metric Lineage &amp; Calculations</h2>
+
+    <p class="text-slate-600 mb-2">Every metric below shows the full derivation chain: source field &rarr; intermediate transform &rarr; final value. Edge cases and NULL handling are documented because that&rsquo;s where pipelines break in production.</p>
+    <p class="text-slate-500 text-sm mb-8">Confidence levels: <span class="px-1.5 py-0.5 rounded text-xs font-bold" style="background-color:rgba(46,132,74,0.1);color:#2e844a">HIGH</span> = confirmed data exists. <span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span> = reasonable assumption, validate Week 1. <span class="px-1.5 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">LOW</span> = guess, may not exist.</p>
+
+    <!-- Metric dependency diagram -->
+    <div class="p-5 rounded-xl bg-slate-50 border border-slate-200 mb-8 font-mono text-xs text-slate-600">
+      <div class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 font-sans">Metric Dependency Graph</div>
+<pre class="bg-slate-50 text-slate-600 p-0 text-xs" style="background:transparent;color:#475569">
+Source Tables                  Intermediate                    Final Metrics
+─────────────                  ────────────                    ─────────────
+asset_line_item.quantity ───── Licensed_Seats ─────┐
+                                                    ├── Usage_Score ──── Usage_Tier
+usage.user_id ───────────────  Active_Users ───────┤                        │
+                                                    │                        ├── Risk_Flag
+usage.user_id + feature ─────  Feature_Adoption ──┘                        │
+                                                                             │
+usage.event_ts ──────────────  Last_Active ─────── Days_Inactive ──────────┘
+
+opportunity.close_date ──────────────────────────── Days_To_Renewal ────── Risk_Flag
+
+usage_snapshots[m-12..m-1] ── Monthly_Scores ────── slope() ───────────── Usage_Trend
+
+competitive_notes (text) ──── LLM / zero-shot ──── Loss_Reason_Classified
+                                                    (+ primary picklist as fallback)
+</pre>
+    </div>
+
+    <!-- M1: Licensed Seats -->
+    <div class="mb-8 p-5 rounded-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-slate-900">Licensed_Seats</h3>
+        <span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span>
+      </div>
+      <div class="grid grid-cols-3 gap-4 text-sm mb-4">
+        <div><div class="text-xs font-bold text-slate-400 uppercase mb-1">Source</div><div class="text-slate-600"><code class="text-xs">asset_line_item.quantity</code></div></div>
+        <div><div class="text-xs font-bold text-slate-400 uppercase mb-1">Type</div><div class="text-slate-600">Integer</div></div>
+        <div><div class="text-xs font-bold text-slate-400 uppercase mb-1">Valid Range</div><div class="text-slate-600">1 &ndash; 100,000 (cap at 100K)</div></div>
+      </div>
+<pre>
+<span class="kw">SELECT</span> account_id,
+       <span class="fn">MAX</span>(quantity) <span class="kw">AS</span> licensed_seats
+<span class="kw">FROM</span> asset_line_items
+<span class="kw">WHERE</span> product_family = <span class="str">'Sales Cloud'</span>    <span class="cm">-- filter to relevant product</span>
+  <span class="kw">AND</span> status = <span class="str">'Active'</span>                  <span class="cm">-- exclude expired/cancelled assets</span>
+  <span class="kw">AND</span> quantity &gt; <span class="num">0</span>                      <span class="cm">-- exclude $0 line items</span>
+<span class="kw">GROUP BY</span> account_id
+</pre>
+      <div class="mt-3 space-y-2 text-sm">
+        <div class="p-3 rounded-lg bg-amber-50 border border-amber-200">
+          <strong class="text-amber-700">Edge case: multi-product accounts.</strong> <span class="text-slate-600">An account can have Sales Cloud (50 seats) + Service Cloud (30 seats). Do we sum across products or take per-product? Per-product for now &mdash; each product line gets its own usage analysis. Cross-product composite is V2.</span>
+        </div>
+        <div class="p-3 rounded-lg bg-amber-50 border border-amber-200">
+          <strong class="text-amber-700">Edge case: expired assets.</strong> <span class="text-slate-600">If an asset expired before close date, it shouldn&rsquo;t count. Filter on <code class="text-xs">status = 'Active'</code> AND asset dates overlapping the close period.</span>
+        </div>
+        <div class="p-3 rounded-lg bg-red-50 border border-red-200">
+          <strong class="text-red-700">NULL handling:</strong> <span class="text-slate-600">If no asset line items exist for the account, Licensed_Seats = NULL. This is a signal &mdash; no tracked product, not &ldquo;zero seats.&rdquo; Do NOT default to 0.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- M2: Active Users -->
+    <div class="mb-8 p-5 rounded-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-slate-900">Active_Users</h3>
+        <span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span>
+      </div>
+      <div class="grid grid-cols-3 gap-4 text-sm mb-4">
+        <div><div class="text-xs font-bold text-slate-400 uppercase mb-1">Source</div><div class="text-slate-600"><code class="text-xs">usage.user_id</code>, <code class="text-xs">usage.event_ts</code></div></div>
+        <div><div class="text-xs font-bold text-slate-400 uppercase mb-1">Type</div><div class="text-slate-600">Integer</div></div>
+        <div><div class="text-xs font-bold text-slate-400 uppercase mb-1">Valid Range</div><div class="text-slate-600">0 &ndash; Licensed_Seats</div></div>
+      </div>
+<pre>
+<span class="kw">SELECT</span> account_id,
+       <span class="fn">COUNT</span>(<span class="kw">DISTINCT</span> user_id) <span class="kw">AS</span> active_users
+<span class="kw">FROM</span> usage_events
+<span class="kw">WHERE</span> event_ts <span class="kw">BETWEEN</span> <span class="fn">DATEADD</span>(<span class="str">'day'</span>, <span class="num">-30</span>, :snapshot_date)
+                   <span class="kw">AND</span> :snapshot_date
+<span class="kw">GROUP BY</span> account_id
+</pre>
+      <div class="mt-3 space-y-2 text-sm">
+        <div class="p-3 rounded-lg bg-amber-50 border border-amber-200">
+          <strong class="text-amber-700">Open question: what counts as &ldquo;active&rdquo;?</strong> <span class="text-slate-600">Login? Any feature use? API call? This definition changes the number dramatically. A login-only definition will show higher activity than a feature-use definition. Propose: start with login as baseline, add feature-use as a separate metric in V2.</span>
+        </div>
+        <div class="p-3 rounded-lg bg-amber-50 border border-amber-200">
+          <strong class="text-amber-700">Edge case: Active_Users &gt; Licensed_Seats.</strong> <span class="text-slate-600">Possible if licenses were downgraded but users still have cached sessions. Cap at Licensed_Seats in the ratio, log violations.</span>
+        </div>
+        <div class="p-3 rounded-lg bg-red-50 border border-red-200">
+          <strong class="text-red-700">NULL handling:</strong> <span class="text-slate-600">If no usage events exist for the account in the 30-day window, Active_Users = 0 (not NULL). Zero is meaningful &mdash; they have a product but nobody used it.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- M3: Usage Score -->
+    <div class="mb-8 p-5 rounded-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-slate-900">Usage_Score</h3>
+        <span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span>
+      </div>
+
+      <p class="text-sm text-slate-600 mb-4">Weighted composite. <strong class="text-red-600">The weights (50/30/20) are assumptions.</strong> Calibration against known churned vs retained accounts is a Week 2&ndash;3 task. If feature adoption data doesn&rsquo;t exist, this becomes a 2-factor model with rebalanced weights (60/40).</p>
+
+      <div class="rounded-lg bg-slate-900 text-white p-4 font-mono text-sm text-center mb-4">
+        Usage_Score = (w1 &times; License_Util) + (w2 &times; Active_User_Rate) + (w3 &times; Feature_Adoption)
+      </div>
+
+      <div class="rounded-xl border border-slate-200 overflow-hidden mb-4">
+        <table class="w-full text-sm">
+          <thead><tr class="border-b border-slate-200 bg-slate-50">
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Component</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Proposed Weight</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Calculation</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Example</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Confidence</th>
+          </tr></thead>
+          <tbody class="text-slate-600">
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-slate-800">License Utilization</td><td class="p-3 font-mono">0.50</td><td class="p-3 font-mono text-xs">Assigned / Licensed</td><td class="p-3 font-mono text-xs">35/50 = 70%</td><td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MED</span></td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-slate-800">Active User Rate</td><td class="p-3 font-mono">0.30</td><td class="p-3 font-mono text-xs">MAU / Assigned</td><td class="p-3 font-mono text-xs">20/35 = 57%</td><td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MED</span></td></tr>
+            <tr><td class="p-3 font-semibold text-slate-800">Feature Adoption</td><td class="p-3 font-mono">0.20</td><td class="p-3 font-mono text-xs">Core_Feature_Users / MAU</td><td class="p-3 font-mono text-xs">12/20 = 60%</td><td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">LOW</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+<pre>
+<span class="kw">WITH</span> base <span class="kw">AS</span> (
+  <span class="kw">SELECT</span>
+    a.account_id,
+    a.licensed_seats,
+    a.active_users,
+    a.feature_users,
+    <span class="cm">-- License Utilization</span>
+    <span class="kw">CASE WHEN</span> a.licensed_seats &gt; <span class="num">0</span>
+         <span class="kw">THEN</span> a.active_users::<span class="kw">FLOAT</span> / a.licensed_seats
+         <span class="kw">ELSE NULL</span> <span class="kw">END</span> <span class="kw">AS</span> license_util,
+    <span class="cm">-- Active User Rate</span>
+    <span class="kw">CASE WHEN</span> a.active_users &gt; <span class="num">0</span>
+         <span class="kw">THEN</span> <span class="fn">LEAST</span>(a.active_users::<span class="kw">FLOAT</span> / <span class="fn">NULLIF</span>(a.licensed_seats, <span class="num">0</span>), <span class="num">1.0</span>)
+         <span class="kw">ELSE</span> <span class="num">0.0</span> <span class="kw">END</span> <span class="kw">AS</span> active_user_rate,
+    <span class="cm">-- Feature Adoption (may be NULL if not tracked)</span>
+    <span class="kw">CASE WHEN</span> a.active_users &gt; <span class="num">0</span> <span class="kw">AND</span> a.feature_users <span class="kw">IS NOT NULL</span>
+         <span class="kw">THEN</span> a.feature_users::<span class="kw">FLOAT</span> / a.active_users
+         <span class="kw">ELSE NULL</span> <span class="kw">END</span> <span class="kw">AS</span> feature_adoption
+  <span class="kw">FROM</span> account_usage_snapshot a
+)
+<span class="kw">SELECT</span>
+  account_id,
+  <span class="kw">CASE</span>
+    <span class="cm">-- 3-factor model (all components available)</span>
+    <span class="kw">WHEN</span> feature_adoption <span class="kw">IS NOT NULL THEN</span>
+      (<span class="num">0.50</span> * <span class="fn">COALESCE</span>(license_util, <span class="num">0</span>))
+    + (<span class="num">0.30</span> * active_user_rate)
+    + (<span class="num">0.20</span> * feature_adoption)
+    <span class="cm">-- 2-factor fallback (feature adoption not tracked)</span>
+    <span class="kw">WHEN</span> license_util <span class="kw">IS NOT NULL THEN</span>
+      (<span class="num">0.60</span> * license_util) + (<span class="num">0.40</span> * active_user_rate)
+    <span class="cm">-- No usage data at all</span>
+    <span class="kw">ELSE NULL</span>
+  <span class="kw">END</span> <span class="kw">AS</span> usage_score
+<span class="kw">FROM</span> base
+</pre>
+
+      <div class="mt-3 p-3 rounded-lg bg-slate-50 border border-slate-200 text-sm text-slate-600">
+        <strong class="text-slate-800">Example (3-factor):</strong> (0.50 &times; 0.70) + (0.30 &times; 0.57) + (0.20 &times; 0.60) = 0.35 + 0.171 + 0.12 = <strong class="text-slate-900">64.1%</strong><br>
+        <strong class="text-slate-800">Example (2-factor fallback):</strong> (0.60 &times; 0.70) + (0.40 &times; 0.57) = 0.42 + 0.228 = <strong class="text-slate-900">64.8%</strong>
+      </div>
+    </div>
+
+    <!-- M4: Usage Tier -->
+    <div class="mb-8 p-5 rounded-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-slate-900">Usage_Tier</h3>
+        <span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span>
+      </div>
+      <p class="text-sm text-slate-600 mb-4">Thresholds (30% / 70%) are assumptions based on industry benchmarks. Must calibrate against actual churn data. If the natural break points are at 25% and 60%, these thresholds are wrong and the dashboard misleads.</p>
+<pre>
+<span class="kw">CASE</span>
+  <span class="kw">WHEN</span> usage_score <span class="kw">IS NULL THEN</span> <span class="str">'NO_DATA'</span>    <span class="cm">-- don't default to LOW</span>
+  <span class="kw">WHEN</span> usage_score &lt; <span class="num">0.30</span>  <span class="kw">THEN</span> <span class="str">'LOW'</span>
+  <span class="kw">WHEN</span> usage_score &lt; <span class="num">0.70</span>  <span class="kw">THEN</span> <span class="str">'MED'</span>
+  <span class="kw">ELSE</span> <span class="str">'HIGH'</span>
+<span class="kw">END</span> <span class="kw">AS</span> usage_tier
+</pre>
+      <div class="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm">
+        <strong class="text-amber-700">Critical:</strong> <span class="text-slate-600">NULL usage &ne; LOW usage. An account with no tracking configured is different from an account with 10% utilization. The dashboard must show &ldquo;No Data&rdquo; as a separate state, not lumped into LOW.</span>
+      </div>
+    </div>
+
+    <!-- M5: Days Inactive -->
+    <div class="mb-8 p-5 rounded-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-slate-900">Days_Inactive</h3>
+        <span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span>
+      </div>
+<pre>
+<span class="kw">CASE</span>
+  <span class="kw">WHEN</span> last_active <span class="kw">IS NULL THEN NULL</span>             <span class="cm">-- no tracking = unknown, not 0</span>
+  <span class="kw">WHEN</span> last_active &gt; close_date <span class="kw">THEN</span> <span class="num">0</span>          <span class="cm">-- data quality issue: log but set to 0</span>
+  <span class="kw">ELSE</span> <span class="fn">DATEDIFF</span>(<span class="str">'day'</span>, last_active, close_date)
+<span class="kw">END</span> <span class="kw">AS</span> days_inactive
+</pre>
+      <div class="mt-3 space-y-2 text-sm">
+        <div class="p-3 rounded-lg bg-amber-50 border border-amber-200">
+          <strong class="text-amber-700">Edge case: Last_Active &gt; Close_Date.</strong> <span class="text-slate-600">Shouldn&rsquo;t happen if point-in-time join is correct. If it does, it&rsquo;s a data quality issue (snapshot date mismatch). Log to QA table, set to 0.</span>
+        </div>
+        <div class="p-3 rounded-lg bg-red-50 border border-red-200">
+          <strong class="text-red-700">NULL handling:</strong> <span class="text-slate-600">NULL = &ldquo;we don&rsquo;t know when they were last active.&rdquo; Do NOT default to a large number (that would make them look inactive when we simply don&rsquo;t have data).</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- M6: Risk Flag -->
+    <div class="mb-8 p-5 rounded-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-slate-900">Risk_Flag</h3>
+        <span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span>
+      </div>
+<pre>
+<span class="kw">CASE</span>
+  <span class="kw">WHEN</span> usage_tier = <span class="str">'LOW'</span>
+   <span class="kw">AND</span> days_to_renewal <span class="kw">IS NOT NULL</span>
+   <span class="kw">AND</span> days_to_renewal &lt; <span class="num">90</span>
+  <span class="kw">THEN TRUE</span>
+  <span class="kw">ELSE FALSE</span>
+<span class="kw">END</span> <span class="kw">AS</span> risk_flag
+</pre>
+      <div class="mt-3 space-y-2 text-sm">
+        <div class="p-3 rounded-lg bg-amber-50 border border-amber-200">
+          <strong class="text-amber-700">Edge case: renewal date unavailable.</strong> <span class="text-slate-600">If renewal date isn&rsquo;t on Opportunity, must derive from Contract end date. If neither exists, Risk_Flag = FALSE (we can&rsquo;t assess timing risk). This is a data gap, not a clean bill of health &mdash; dashboard should show &ldquo;Renewal date unknown.&rdquo;</span>
+        </div>
+        <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
+          <strong class="text-slate-700">Threshold:</strong> <span class="text-slate-600">90 days is an assumption. Gives CS ~10 weeks to intervene. May need tuning &mdash; some enterprise renewals need 6-month lead time. Make configurable.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- M7: Usage Trend -->
+    <div class="mb-8 p-5 rounded-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-slate-900">Usage_Trend (12-Month)</h3>
+        <span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span>
+      </div>
+
+      <p class="text-sm text-slate-600 mb-4">Classifies the <em>shape</em> of usage decline over 12 months before close. A score of 18% at close means nothing without context &mdash; was it always 18% or did it used to be 70%?</p>
+
+<pre>
+<span class="kw">WITH</span> monthly_scores <span class="kw">AS</span> (
+  <span class="kw">SELECT</span>
+    account_id,
+    <span class="fn">DATE_TRUNC</span>(<span class="str">'month'</span>, snapshot_date) <span class="kw">AS</span> month,
+    <span class="fn">AVG</span>(usage_score) <span class="kw">AS</span> avg_score,
+    <span class="fn">ROW_NUMBER</span>() <span class="kw">OVER</span> (
+      <span class="kw">PARTITION BY</span> account_id <span class="kw">ORDER BY</span> <span class="fn">DATE_TRUNC</span>(<span class="str">'month'</span>, snapshot_date)
+    ) <span class="kw">AS</span> month_idx
+  <span class="kw">FROM</span> account_usage_snapshots
+  <span class="kw">WHERE</span> snapshot_date <span class="kw">BETWEEN</span> <span class="fn">DATEADD</span>(<span class="str">'month'</span>, <span class="num">-12</span>, :close_date)
+                          <span class="kw">AND</span> :close_date
+  <span class="kw">GROUP BY</span> account_id, <span class="fn">DATE_TRUNC</span>(<span class="str">'month'</span>, snapshot_date)
+),
+slopes <span class="kw">AS</span> (
+  <span class="kw">SELECT</span> account_id,
+    <span class="fn">REGR_SLOPE</span>(avg_score, month_idx) <span class="kw">AS</span> trend_slope,
+    <span class="fn">COUNT</span>(*) <span class="kw">AS</span> months_available,
+    <span class="fn">STDDEV</span>(avg_score) <span class="kw">AS</span> score_volatility
+  <span class="kw">FROM</span> monthly_scores
+  <span class="kw">GROUP BY</span> account_id
+)
+<span class="kw">SELECT</span> account_id,
+  <span class="kw">CASE</span>
+    <span class="kw">WHEN</span> months_available &lt; <span class="num">6</span>          <span class="kw">THEN</span> <span class="str">'INSUFFICIENT_DATA'</span>
+    <span class="kw">WHEN</span> trend_slope &lt; <span class="num">-0.03</span>
+     <span class="kw">AND</span> score_volatility &lt; <span class="num">0.15</span>      <span class="kw">THEN</span> <span class="str">'PREDICTABLE_DECLINE'</span>
+    <span class="kw">WHEN</span> trend_slope &lt; <span class="num">-0.08</span>           <span class="kw">THEN</span> <span class="str">'SUDDEN_DROP'</span>
+    <span class="kw">WHEN</span> <span class="fn">ABS</span>(trend_slope) &lt; <span class="num">0.01</span>
+     <span class="kw">AND</span> <span class="fn">AVG</span>(avg_score) &lt; <span class="num">0.30</span>       <span class="kw">THEN</span> <span class="str">'NEVER_ADOPTED'</span>
+    <span class="kw">WHEN</span> trend_slope &gt; <span class="num">0.02</span>            <span class="kw">THEN</span> <span class="str">'IMPROVING'</span>
+    <span class="kw">ELSE</span> <span class="str">'STABLE'</span>
+  <span class="kw">END</span> <span class="kw">AS</span> usage_trend
+<span class="kw">FROM</span> slopes
+</pre>
+
+      <div class="mt-3 space-y-2 text-sm">
+        <div class="p-3 rounded-lg bg-red-50 border border-red-200">
+          <strong class="text-red-700">Slope thresholds (-0.03, -0.08, 0.01) are guesses.</strong> <span class="text-slate-600">Need calibration against labeled examples of known decline patterns. These will shift when we see real data distributions. Make them configurable parameters, not hardcoded.</span>
+        </div>
+        <div class="p-3 rounded-lg bg-amber-50 border border-amber-200">
+          <strong class="text-amber-700">Edge case: &lt;6 months of data.</strong> <span class="text-slate-600">Trend classification is unreliable with sparse data. Return INSUFFICIENT_DATA &mdash; don&rsquo;t force-classify.</span>
+        </div>
+      </div>
+
+      <div class="mt-4 rounded-xl border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm">
+          <thead><tr class="border-b border-slate-200 bg-slate-50">
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Classification</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Pattern</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Implication</th>
+          </tr></thead>
+          <tbody class="text-slate-600">
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-red-600">PREDICTABLE_DECLINE</td><td class="p-3">70% &rarr; 18% steady drop</td><td class="p-3">Preventable. CS should have intervened earlier.</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-amber-600">SUDDEN_DROP</td><td class="p-3">65% &rarr; 10% in 2 months</td><td class="p-3">Specific event. Champion left? Competitor demo? Investigate.</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold" style="color:#7c3aed">NEVER_ADOPTED</td><td class="p-3">~20% flat the entire time</td><td class="p-3">Onboarding failure, not churn. Different root cause.</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold" style="color:#2e844a">IMPROVING</td><td class="p-3">Upward trend</td><td class="p-3">Good sign. Expansion target.</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-slate-500">STABLE</td><td class="p-3">No significant change</td><td class="p-3">Monitor. May be fine or may be stagnant.</td></tr>
+            <tr><td class="p-3 font-semibold text-slate-400">INSUFFICIENT_DATA</td><td class="p-3">&lt;6 months available</td><td class="p-3">Cannot classify. Do not guess.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- M8: Loss Reason -->
+    <div class="mb-8 p-5 rounded-xl border border-slate-200">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-base font-bold text-slate-900">Loss_Reason_Classified</h3>
+        <span class="px-2 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">LOW</span>
+      </div>
+      <p class="text-sm text-slate-600 mb-4">Extracted from <code class="text-xs">Competitive_Notes</code> (Long Text 4000). <strong class="text-red-600">This is the lowest-confidence metric.</strong> We don&rsquo;t know: fill rate of Competitive_Notes, average text quality, whether reps type one word or two paragraphs. Accuracy of LLM classification is unknown until tested on a labeled sample.</p>
+
+      <div class="rounded-xl border border-slate-200 overflow-hidden mb-4">
+        <table class="w-full text-sm">
+          <thead><tr class="border-b border-slate-200 bg-slate-50">
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Category</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Signal Patterns</th>
+            <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Routes To</th>
+          </tr></thead>
+          <tbody class="text-slate-600">
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-slate-800">Price undercut</td><td class="p-3 text-xs">&ldquo;cheaper&rdquo;, &ldquo;budget&rdquo;, &ldquo;30% less&rdquo;</td><td class="p-3 text-xs font-semibold text-amber-600">Pricing Team</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-slate-800">Feature gap</td><td class="p-3 text-xs">&ldquo;reporting module&rdquo;, &ldquo;they have X we don&rsquo;t&rdquo;</td><td class="p-3 text-xs font-semibold" style="color:#0176d3">Product Team</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-slate-800">Relationship loss</td><td class="p-3 text-xs">&ldquo;new CIO&rdquo;, &ldquo;contact left&rdquo;</td><td class="p-3 text-xs font-semibold" style="color:#2e844a">Sales Ops</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-slate-800">Vendor consolidation</td><td class="p-3 text-xs">&ldquo;standardizing on Oracle&rdquo;, &ldquo;single vendor&rdquo;</td><td class="p-3 text-xs text-slate-400">Track only</td></tr>
+            <tr class="border-b border-slate-50"><td class="p-3 font-semibold text-slate-800">Low engagement</td><td class="p-3 text-xs">&ldquo;not using&rdquo;, &ldquo;didn&rsquo;t see value&rdquo;</td><td class="p-3 text-xs font-semibold text-red-600">CS Team</td></tr>
+            <tr><td class="p-3 font-semibold text-slate-400">UNCLASSIFIED</td><td class="p-3 text-xs">Empty notes / low confidence / gibberish</td><td class="p-3 text-xs text-slate-400">Fall back to primary picklist</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="p-3 rounded-lg bg-red-50 border border-red-200 text-sm">
+        <strong class="text-red-700">Honest assessment:</strong> <span class="text-slate-600">This metric may not be usable in V1. If Competitive_Notes fill rate is &lt;40%, or if notes are one-word entries (&ldquo;price&rdquo;, &ldquo;feature&rdquo;), classification accuracy will be poor. V1 plan: run classification on a 500-record sample, manually label 100 for accuracy baseline. If accuracy &lt;70%, ship with primary picklist only and defer LLM to V2.</span>
+      </div>
+    </div>
+
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 8. OUTPUT SCHEMA                        -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="schema" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">08</span> Output Schema</h2>
+
+    <p class="text-slate-600 mb-4">Final table: <code class="text-xs px-2 py-1 bg-slate-100 rounded font-semibold">competitive_deal_outcomes</code>. One row per deal-competitor pair. ~200K&ndash;500K rows estimated.</p>
+
+    <div class="rounded-xl border border-slate-200 overflow-hidden">
+      <table class="w-full text-xs">
+        <thead><tr class="border-b-2 border-slate-200 bg-slate-50">
+          <th class="text-left p-2.5 font-semibold text-slate-500 uppercase tracking-wider">Column</th>
+          <th class="text-left p-2.5 font-semibold text-slate-500 uppercase tracking-wider">Type</th>
+          <th class="text-left p-2.5 font-semibold text-slate-500 uppercase tracking-wider">Source</th>
+          <th class="text-left p-2.5 font-semibold text-slate-500 uppercase tracking-wider">Nullable</th>
+          <th class="text-left p-2.5 font-semibold text-slate-500 uppercase tracking-wider">Description</th>
+        </tr></thead>
+        <tbody class="text-slate-600 font-mono">
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold text-slate-800">opportunity_id</td><td class="p-2.5">VARCHAR</td><td class="p-2.5 font-sans">Opportunity</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">Primary key (with competitor_id)</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold text-slate-800">account_id</td><td class="p-2.5">VARCHAR(18)</td><td class="p-2.5 font-sans">Opportunity</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">Normalized 18-char SF ID</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold text-slate-800">account_name</td><td class="p-2.5">VARCHAR</td><td class="p-2.5 font-sans">Account</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">Display name</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold text-slate-800">close_date</td><td class="p-2.5">DATE</td><td class="p-2.5 font-sans">Opportunity</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">Date deal was lost</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold text-slate-800">amount</td><td class="p-2.5">DECIMAL</td><td class="p-2.5 font-sans">Opportunity</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">Deal ARR. Can be $0.</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold" style="color:#7c3aed">competitor_id</td><td class="p-2.5">VARCHAR</td><td class="p-2.5 font-sans">Junction</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">FK to CI_Competitor catalog</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold" style="color:#7c3aed">competitor_name</td><td class="p-2.5">VARCHAR</td><td class="p-2.5 font-sans">CI_Competitor</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">Resolved competitor name</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold" style="color:#7c3aed">is_leading</td><td class="p-2.5">BOOLEAN</td><td class="p-2.5 font-sans">Junction</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">TRUE = this competitor won</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold" style="color:#7c3aed">is_incumbent</td><td class="p-2.5">BOOLEAN</td><td class="p-2.5 font-sans">Junction</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">Current provider replacing us?</td></tr>
+          <tr class="border-b border-slate-50"><td class="p-2.5 font-semibold" style="color:#7c3aed">competitive_notes</td><td class="p-2.5">TEXT</td><td class="p-2.5 font-sans">Junction</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">Raw rep notes (up to 4000 chars)</td></tr>
+          <tr class="border-b border-slate-50 bg-amber-50"><td class="p-2.5 font-semibold text-amber-700">licensed_seats</td><td class="p-2.5">INT</td><td class="p-2.5 font-sans">Derived</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">NULL = no asset data</td></tr>
+          <tr class="border-b border-slate-50 bg-amber-50"><td class="p-2.5 font-semibold text-amber-700">active_users</td><td class="p-2.5">INT</td><td class="p-2.5 font-sans">Derived</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">MAU at close date</td></tr>
+          <tr class="border-b border-slate-50 bg-amber-50"><td class="p-2.5 font-semibold text-amber-700">usage_score</td><td class="p-2.5">FLOAT</td><td class="p-2.5 font-sans">Derived</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">Composite 0.0&ndash;1.0. NULL = no data.</td></tr>
+          <tr class="border-b border-slate-50 bg-amber-50"><td class="p-2.5 font-semibold text-amber-700">usage_tier</td><td class="p-2.5">VARCHAR</td><td class="p-2.5 font-sans">Derived</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">LOW / MED / HIGH / NO_DATA</td></tr>
+          <tr class="border-b border-slate-50 bg-amber-50"><td class="p-2.5 font-semibold text-amber-700">days_inactive</td><td class="p-2.5">INT</td><td class="p-2.5 font-sans">Derived</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">NULL = unknown, 0 = active at close</td></tr>
+          <tr class="border-b border-slate-50 bg-amber-50"><td class="p-2.5 font-semibold text-amber-700">usage_trend</td><td class="p-2.5">VARCHAR</td><td class="p-2.5 font-sans">Derived</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">PREDICTABLE_DECLINE / SUDDEN_DROP / NEVER_ADOPTED / IMPROVING / STABLE / INSUFFICIENT_DATA</td></tr>
+          <tr class="border-b border-slate-50 bg-amber-50"><td class="p-2.5 font-semibold text-amber-700">risk_flag</td><td class="p-2.5">BOOLEAN</td><td class="p-2.5 font-sans">Derived</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">TRUE when LOW tier + renewal &lt;90d</td></tr>
+          <tr class="border-b border-slate-50 bg-amber-50"><td class="p-2.5 font-semibold text-amber-700">loss_reason_picklist</td><td class="p-2.5">VARCHAR</td><td class="p-2.5 font-sans">Opportunity</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">Primary loss reason (existing field)</td></tr>
+          <tr class="border-b border-slate-50 bg-amber-50"><td class="p-2.5 font-semibold text-amber-700">loss_reason_classified</td><td class="p-2.5">VARCHAR</td><td class="p-2.5 font-sans">Derived (LLM)</td><td class="p-2.5">YES</td><td class="p-2.5 font-sans">LLM output. May be UNCLASSIFIED.</td></tr>
+          <tr class="bg-slate-50"><td class="p-2.5 font-semibold text-slate-500">snapshot_date</td><td class="p-2.5">DATE</td><td class="p-2.5 font-sans">Pipeline</td><td class="p-2.5">NO</td><td class="p-2.5 font-sans">When this row was computed</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 9. RISKS & FAILURE MODES                -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="risks" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">09</span> Risks &amp; Failure Modes</h2>
+
+    <div class="rounded-xl border border-slate-200 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead><tr class="border-b-2 border-slate-200 bg-slate-50">
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Risk</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Likelihood</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Impact</th>
+          <th class="text-left p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Mitigation</th>
+        </tr></thead>
+        <tbody class="text-slate-600">
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">Usage data doesn&rsquo;t exist in expected form</td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span></td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-red-100 text-red-700">HIGH</span></td>
+            <td class="p-3">Day 1 discovery task. If asset hierarchy is different, redesign derivation. If no usage events exist, Usage_Score cannot be built &mdash; pipeline delivers deal + competitor data only (still valuable).</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">Historical snapshots don&rsquo;t exist</td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span></td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span></td>
+            <td class="p-3">Build SCD Type 2 from scratch. Lose all historical trend analysis before build date. Backfill from any available monthly aggregates if they exist.</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">Competitive_Notes fill rate is low (&lt;40%)</td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span></td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span></td>
+            <td class="p-3">Fall back to primary loss reason picklist. LLM classification deferred to V2. Still surface the data gap as a finding (&ldquo;60% of lost deals have no competitive notes &mdash; process improvement needed&rdquo;).</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">Leading flag not maintained post-close</td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span></td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span></td>
+            <td class="p-3">Cross-reference with Opportunity Stage history. If only one competitor on the deal and stage = Closed Lost, that competitor won by default. For multi-competitor deals without Leading flag, label as UNATTRIBUTED.</td>
+          </tr>
+          <tr class="border-b border-slate-100">
+            <td class="p-3 font-semibold text-slate-800">LLM classification produces garbage</td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span></td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">LOW</span></td>
+            <td class="p-3">LLM output is additive (separate column). Does not replace source data. If accuracy &lt;70% on labeled sample, don&rsquo;t ship to dashboard &mdash; keep in dev until improved.</td>
+          </tr>
+          <tr>
+            <td class="p-3 font-semibold text-slate-800">908-record competitor catalog has duplicates</td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold" style="background-color:rgba(46,132,74,0.1);color:#2e844a">HIGH</span></td>
+            <td class="p-3"><span class="px-1.5 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">MEDIUM</span></td>
+            <td class="p-3">Build entity resolution mapping table (e.g., &ldquo;Oracle Cloud&rdquo; &rarr; &ldquo;Oracle&rdquo;). Use in Enrich step. Existing zero-shot classification approach can be extended for this.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ════════════════════════════════════════ -->
+  <!-- 10. DELIVERY & ROADMAP                  -->
+  <!-- ════════════════════════════════════════ -->
+  <section id="delivery" class="mb-16">
+    <h2 class="text-2xl font-bold text-slate-900 mb-6"><span class="text-slate-300 font-mono text-lg mr-2">10</span> Delivery &amp; Roadmap</h2>
+
+    <h3 class="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">Four Delivery Channels</h3>
+    <div class="grid grid-cols-4 gap-3 mb-8">
+      <div class="p-4 rounded-xl border border-slate-200 text-center">
+        <div class="text-sm font-bold mb-1" style="color:#0176d3">Tableau</div>
+        <div class="text-xs text-slate-400">Pull &middot; On-demand</div>
+      </div>
+      <div class="p-4 rounded-xl border border-slate-200 text-center">
+        <div class="text-sm font-bold mb-1" style="color:#2e844a">Agentforce</div>
+        <div class="text-xs text-slate-400">AI &middot; Semantic queries</div>
+      </div>
+      <div class="p-4 rounded-xl border border-slate-200 text-center">
+        <div class="text-sm font-bold mb-1" style="color:#7c3aed">Slack Digests</div>
+        <div class="text-xs text-slate-400">Push &middot; Weekly</div>
+      </div>
+      <div class="p-4 rounded-xl border border-slate-200 text-center">
+        <div class="text-sm font-bold text-red-600 mb-1">CS Alerts</div>
+        <div class="text-xs text-slate-400">Proactive &middot; Threshold</div>
+      </div>
+    </div>
+
+    <h3 class="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">What Ships When</h3>
+    <div class="space-y-4">
+      <div class="p-5 rounded-xl border border-slate-200" style="border-left:3px solid #0176d3">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="text-xs font-bold uppercase tracking-wider" style="color:#0176d3">V1 &middot; Days 1&ndash;60</span>
+        </div>
+        <ul class="text-sm text-slate-600 space-y-1">
+          <li>Map actual usage objects (Week 1 &mdash; biggest unknown)</li>
+          <li>Build Usage_Score derivation + calibrate against known accounts</li>
+          <li>Extract + QA + Join pipeline (daily batch)</li>
+          <li><code class="text-xs">competitive_deal_outcomes</code> table populated</li>
+          <li>Tableau dashboard: KPIs, loss rate by tier, at-risk table</li>
+          <li><strong>Does NOT include:</strong> LLM classification, Slack digests, CS alerts, Agentforce</li>
+        </ul>
+      </div>
+
+      <div class="p-5 rounded-xl border border-slate-200" style="border-left:3px solid #7c3aed">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="text-xs font-bold uppercase tracking-wider" style="color:#7c3aed">V2 &middot; Days 60&ndash;120</span>
+        </div>
+        <ul class="text-sm text-slate-600 space-y-1">
+          <li>Loss reason classification (LLM on Competitive_Notes, if fill rate &gt;40%)</li>
+          <li>Slack weekly digests + CS threshold alerts</li>
+          <li>Competitor entity resolution (dedup the 908-record catalog)</li>
+          <li>Semantic layer for Agentforce</li>
+        </ul>
+      </div>
+
+      <div class="p-5 rounded-xl border border-slate-200 border-dashed" style="border-left:3px solid #94a3b8">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">V3 &middot; 120+ Days</span>
+        </div>
+        <ul class="text-sm text-slate-600 space-y-1">
+          <li>Battlecard feedback loop (loss reasons &rarr; content updates)</li>
+          <li>Entity resolution from conversational data (Gong/Slack)</li>
+          <li>Predictive model: flag at-risk accounts before competitor shows up</li>
+          <li>CDC for near-real-time pipeline (if daily batch proves insufficient)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ─── FOOTER ─── -->
+  <footer class="pt-8 border-t border-slate-200 text-center">
+    <p class="text-sm text-slate-400">Mohseen Kolhar &middot; Data Engineer, Competitive Intelligence</p>
+  </footer>
+
+</div>
+</body>
+</html>
