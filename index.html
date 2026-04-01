@@ -35,7 +35,7 @@
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
         </button>
         <div class="h-4 w-px bg-slate-300"></div>
-        <span class="text-xs text-slate-500 font-mono" id="slideCounter">1 / 12</span>
+        <span class="text-xs text-slate-500 font-mono" id="slideCounter">1 / 13</span>
         <div class="h-4 w-px bg-slate-300"></div>
         <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider" style="background-color:rgba(46,132,74,0.1);color:#2e844a">Part 2</span>
       </div>
@@ -104,7 +104,7 @@
                 <p class="text-sm text-slate-600 leading-relaxed">
                   Three Salesforce objects &mdash; <strong class="text-slate-900">Opportunity</strong> (deal outcomes: stage, amount, close date), 
                   <strong class="text-slate-900"> CI_Opportunity_Competitor</strong> (junction table: which competitors were on the deal, who was Leading, competitive notes), 
-                  and <strong class="text-slate-900">Account</strong> (product usage derived from asset line items). Data already in Snowflake via the existing pipeline.
+                  and <strong class="text-slate-900">Account</strong> (product usage derived from asset line items). Data already in Azure EDW via the existing pipeline.
                 </p>
               </div>
 
@@ -114,8 +114,8 @@
                 </div>
                 <h3 class="font-bold mb-3 text-lg" style="color:#7c3aed">The Pipeline</h3>
                 <p class="text-sm text-slate-600 leading-relaxed">
-                  Data flows: <strong class="text-slate-900">Salesforce &rarr; Azure &rarr; Airflow &rarr; Snowflake</strong>. 
-                  Already in the warehouse&mdash;we query from there. Existing infrastructure, new insights.
+                  Data flows: <strong class="text-slate-900">Salesforce &rarr; Azure EDW &rarr; Airflow (transform) &rarr; Snowflake</strong>.
+                  Raw data already in Azure&mdash;we transform in Airflow, serve from Snowflake. Existing infrastructure, new insights.
                 </p>
               </div>
 
@@ -257,9 +257,9 @@
           <div class="grid grid-cols-3 gap-4 pt-4">
             <div class="p-4 rounded-xl bg-white border-2 border-slate-200 shadow-sm">
               <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">The Source</div>
-              <div class="text-sm font-bold text-slate-900 mb-2">Extract from Snowflake</div>
+              <div class="text-sm font-bold text-slate-900 mb-2">Extract from Azure EDW</div>
               <p class="text-[11px] text-slate-600 leading-relaxed font-mono">
-                Data already flows: Salesforce &rarr; Azure &rarr; Airflow &rarr; Snowflake. Query from there.
+                Data lands in Azure EDW. We extract, transform in Airflow, and load enriched tables to Snowflake.
               </p>
             </div>
             <div class="p-4 rounded-xl bg-amber-50 border-2 border-amber-200 shadow-sm">
@@ -280,8 +280,173 @@
         </div>
       </div>
 
-      <!-- SLIDE 3: Architecture -->
+      <!-- SLIDE 3: Composite Usage Score -->
       <div class="slide hidden" id="slide-3">
+        <div class="space-y-7 animate-in">
+          <div class="space-y-4">
+            <div class="inline-block px-4 py-2 rounded-lg text-xs font-bold tracking-wider uppercase" style="background-color:rgba(124,58,237,0.1);border:2px solid rgba(124,58,237,0.3);color:#7c3aed">
+              Step 1b &middot; Deriving Usage &mdash; The Composite Metric
+            </div>
+            <h2 class="text-5xl font-bold leading-tight text-slate-900">
+              Usage Isn&rsquo;t a Field.
+              <br />
+              <span style="color:#7c3aed">We Build It.</span>
+            </h2>
+            <p class="text-lg text-slate-600 max-w-3xl leading-relaxed">
+              Salesforce doesn&rsquo;t store a single &ldquo;usage&rdquo; number. We derive it from three signals in the asset hierarchy,
+              weighted by predictive value for competitive loss.
+            </p>
+          </div>
+
+          <!-- Three Components -->
+          <div class="grid grid-cols-3 gap-6">
+            <!-- License Utilization -->
+            <div class="rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-sm relative" style="border-top:4px solid #0176d3">
+              <div class="absolute -top-3.5 right-4 px-3 py-1 rounded-lg text-xs font-bold text-white" style="background-color:#0176d3">Weight: 0.50</div>
+              <div class="flex items-center gap-3 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center" style="background-color:rgba(1,118,211,0.1);border:2px solid rgba(1,118,211,0.2)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#0176d3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+                </div>
+                <div>
+                  <h3 class="text-xl font-bold" style="color:#0176d3">License Utilization</h3>
+                  <span class="text-xs font-semibold px-2 py-0.5 rounded" style="background-color:rgba(245,158,11,0.15);color:#b45309">Confidence: MED</span>
+                </div>
+              </div>
+              <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 mb-4">
+                <div class="font-mono text-sm text-slate-700 mb-2"><strong class="text-slate-900">Assigned Seats</strong> / <strong class="text-slate-900">Licensed Seats</strong></div>
+                <div class="text-xs text-slate-500">Source: Asset Line Item &rarr; Quantity (licensed) vs. provisioned count (assigned)</div>
+              </div>
+              <div class="p-4 rounded-xl border-2" style="background-color:rgba(1,118,211,0.05);border-color:rgba(1,118,211,0.2)">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-sm text-slate-600">Example: Nexus Corp</span>
+                  <span class="text-xl font-bold" style="color:#0176d3">70%</span>
+                </div>
+                <div class="text-xs font-mono text-slate-500">35 assigned / 50 licensed = 0.70</div>
+                <div class="mt-3 h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full" style="width:70%;background-color:#0176d3"></div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-500 mt-4 leading-relaxed">
+                <strong class="text-slate-700">Why highest weight:</strong> If a customer bought 50 seats and only assigned 35,
+                the remaining 15 represent shelfware &mdash; the strongest churn predictor.
+              </p>
+            </div>
+
+            <!-- Active User Rate -->
+            <div class="rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-sm relative" style="border-top:4px solid #2e844a">
+              <div class="absolute -top-3.5 right-4 px-3 py-1 rounded-lg text-xs font-bold text-white" style="background-color:#2e844a">Weight: 0.30</div>
+              <div class="flex items-center gap-3 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center" style="background-color:rgba(46,132,74,0.1);border:2px solid rgba(46,132,74,0.2)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2e844a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                </div>
+                <div>
+                  <h3 class="text-xl font-bold" style="color:#2e844a">Active User Rate</h3>
+                  <span class="text-xs font-semibold px-2 py-0.5 rounded" style="background-color:rgba(245,158,11,0.15);color:#b45309">Confidence: MED</span>
+                </div>
+              </div>
+              <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 mb-4">
+                <div class="font-mono text-sm text-slate-700 mb-2"><strong class="text-slate-900">MAU</strong> / <strong class="text-slate-900">Assigned Seats</strong></div>
+                <div class="text-xs text-slate-500">Source: Child usage records &rarr; COUNT(DISTINCT user_id) in trailing 30 days</div>
+              </div>
+              <div class="p-4 rounded-xl border-2" style="background-color:rgba(46,132,74,0.05);border-color:rgba(46,132,74,0.2)">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-sm text-slate-600">Example: Nexus Corp</span>
+                  <span class="text-xl font-bold" style="color:#2e844a">57%</span>
+                </div>
+                <div class="text-xs font-mono text-slate-500">20 active / 35 assigned = 0.57</div>
+                <div class="mt-3 h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full" style="width:57%;background-color:#2e844a"></div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-500 mt-4 leading-relaxed">
+                <strong class="text-slate-700">Why second weight:</strong> Assigned but inactive users signal adoption friction.
+                They have access but aren&rsquo;t logging in &mdash; a leading indicator of disengagement.
+              </p>
+            </div>
+
+            <!-- Feature Adoption -->
+            <div class="rounded-2xl border-2 border-slate-200 bg-white p-6 shadow-sm relative" style="border-top:4px solid #f59e0b">
+              <div class="absolute -top-3.5 right-4 px-3 py-1 rounded-lg text-xs font-bold text-white" style="background-color:#f59e0b">Weight: 0.20</div>
+              <div class="flex items-center gap-3 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center" style="background-color:rgba(245,158,11,0.1);border:2px solid rgba(245,158,11,0.2)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+                </div>
+                <div>
+                  <h3 class="text-xl font-bold text-amber-600">Feature Adoption</h3>
+                  <span class="text-xs font-semibold px-2 py-0.5 rounded" style="background-color:rgba(239,68,68,0.12);color:#b91c1c">Confidence: LOW</span>
+                </div>
+              </div>
+              <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 mb-4">
+                <div class="font-mono text-sm text-slate-700 mb-2"><strong class="text-slate-900">Core_Feature_Users</strong> / <strong class="text-slate-900">MAU</strong></div>
+                <div class="text-xs text-slate-500">Source: Feature event logs &rarr; users touching core differentiating features</div>
+              </div>
+              <div class="p-4 rounded-xl border-2" style="background-color:rgba(245,158,11,0.05);border-color:rgba(245,158,11,0.2)">
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-sm text-slate-600">Example: Nexus Corp</span>
+                  <span class="text-xl font-bold text-amber-600">60%</span>
+                </div>
+                <div class="text-xs font-mono text-slate-500">12 core users / 20 MAU = 0.60</div>
+                <div class="mt-3 h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full" style="width:60%;background-color:#f59e0b"></div>
+                </div>
+              </div>
+              <p class="text-xs text-slate-500 mt-4 leading-relaxed">
+                <strong class="text-slate-700">Why lowest weight &amp; LOW confidence:</strong> Requires feature event tracking which may not be
+                configured for all products. Lower weight compensates for data gaps.
+              </p>
+            </div>
+          </div>
+
+          <!-- Combined Score Computation -->
+          <div class="p-6 rounded-2xl border-2 shadow-sm" style="border-color:rgba(124,58,237,0.4);background:linear-gradient(135deg, rgba(124,58,237,0.03), rgba(124,58,237,0.08))">
+            <div class="flex items-center justify-between mb-5">
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background-color:rgba(124,58,237,0.15)">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+                </div>
+                <h3 class="text-xl font-bold" style="color:#7c3aed">Combined Usage Score</h3>
+              </div>
+              <span class="px-4 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider" style="background-color:rgba(124,58,237,0.15);border:2px solid rgba(124,58,237,0.3);color:#7c3aed">Derived Metric &mdash; Stored as Daily Snapshot</span>
+            </div>
+
+            <div class="flex items-center gap-4 flex-wrap">
+              <!-- Formula -->
+              <div class="flex items-center gap-2 p-4 rounded-xl bg-white border-2 border-slate-200 flex-1">
+                <span class="px-3 py-1.5 rounded-lg text-sm font-bold font-mono text-white" style="background-color:#0176d3">Lic &times; 0.50</span>
+                <span class="text-xl font-bold text-slate-400">+</span>
+                <span class="px-3 py-1.5 rounded-lg text-sm font-bold font-mono text-white" style="background-color:#2e844a">Active &times; 0.30</span>
+                <span class="text-xl font-bold text-slate-400">+</span>
+                <span class="px-3 py-1.5 rounded-lg text-sm font-bold font-mono text-white" style="background-color:#f59e0b">Feature &times; 0.20</span>
+                <span class="text-xl font-bold text-slate-400">=</span>
+                <span class="px-4 py-1.5 rounded-lg text-sm font-bold font-mono text-white" style="background-color:#7c3aed">Combined Score</span>
+              </div>
+
+              <!-- Example Computation -->
+              <div class="p-4 rounded-xl bg-white border-2 border-slate-200" style="min-width:320px">
+                <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Example: Nexus Corp</div>
+                <div class="font-mono text-sm text-slate-700 space-y-1">
+                  <div>(<span style="color:#0176d3">0.70</span> &times; 0.50) + (<span style="color:#2e844a">0.57</span> &times; 0.30) + (<span style="color:#d97706">0.60</span> &times; 0.20)</div>
+                  <div class="text-slate-400">= 0.35 + 0.171 + 0.12</div>
+                  <div class="text-lg font-bold" style="color:#7c3aed">= 64% <span class="text-xs font-normal text-slate-500 ml-2">Tier: MEDIUM</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tier thresholds -->
+            <div class="flex items-center gap-3 mt-5">
+              <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Tiers:</span>
+              <span class="px-3 py-1 rounded-lg text-xs font-bold" style="background-color:rgba(220,38,38,0.1);border:2px solid rgba(220,38,38,0.2);color:#dc2626">LOW &lt; 30%</span>
+              <span class="px-3 py-1 rounded-lg text-xs font-bold" style="background-color:rgba(245,158,11,0.1);border:2px solid rgba(245,158,11,0.2);color:#d97706">MED 30&ndash;70%</span>
+              <span class="px-3 py-1 rounded-lg text-xs font-bold" style="background-color:rgba(46,132,74,0.1);border:2px solid rgba(46,132,74,0.2);color:#2e844a">HIGH &gt; 70%</span>
+              <span class="text-slate-400 mx-2">|</span>
+              <span class="text-xs text-slate-500">This is the &ldquo;Usage&rdquo; number referenced in every downstream step &mdash; joins, enrichment, dashboard, and alerts.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SLIDE 4: Architecture -->
+      <div class="slide hidden" id="slide-4">
         <div class="space-y-4 animate-in">
           <div class="flex items-end justify-between">
             <div class="space-y-2">
@@ -331,8 +496,8 @@
         </div>
       </div>
 
-      <!-- SLIDE 4: Integrity -->
-      <div class="slide hidden" id="slide-4">
+      <!-- SLIDE 5: Integrity -->
+      <div class="slide hidden" id="slide-5">
         <div class="space-y-6 animate-in">
           <div class="space-y-3">
             <div class="inline-block px-4 py-2 rounded-lg bg-red-100 border-2 border-red-300 text-red-700 text-xs font-bold tracking-wider uppercase">
@@ -391,8 +556,8 @@
         </div>
       </div>
 
-      <!-- SLIDE 5: Join Strategy -->
-      <div class="slide hidden" id="slide-5">
+      <!-- SLIDE 6: Join Strategy -->
+      <div class="slide hidden" id="slide-6">
         <div class="space-y-7 animate-in">
           <div class="space-y-3">
             <div class="inline-block px-4 py-2 rounded-lg bg-amber-100 border-2 border-amber-300 text-amber-700 text-xs font-bold tracking-wider uppercase">
@@ -497,8 +662,8 @@
         </div>
       </div>
 
-      <!-- SLIDE 6: Trends -->
-      <div class="slide hidden" id="slide-6">
+      <!-- SLIDE 7: Trends -->
+      <div class="slide hidden" id="slide-7">
         <div class="space-y-6 animate-in">
           <div class="space-y-3">
             <div class="inline-block px-4 py-2 rounded-lg text-xs font-bold tracking-wider uppercase" style="background-color:rgba(124,58,237,0.1);border:2px solid rgba(124,58,237,0.3);color:#7c3aed">
@@ -570,8 +735,8 @@
         </div>
       </div>
 
-      <!-- SLIDE 7: Insights -->
-      <div class="slide hidden" id="slide-7">
+      <!-- SLIDE 8: Insights -->
+      <div class="slide hidden" id="slide-8">
         <div class="space-y-7 animate-in">
           <div class="space-y-3">
             <div class="inline-block px-4 py-2 rounded-lg text-xs font-bold tracking-wider uppercase" style="background-color:rgba(46,132,74,0.1);border:2px solid rgba(46,132,74,0.3);color:#2e844a">
@@ -603,8 +768,8 @@
         </div>
       </div>
 
-      <!-- SLIDE 8: Price Sensitive -->
-      <div class="slide hidden" id="slide-8">
+      <!-- SLIDE 9: Price Sensitive -->
+      <div class="slide hidden" id="slide-9">
         <div class="space-y-7 animate-in">
           <div class="space-y-3">
             <div class="inline-block px-4 py-2 rounded-lg bg-amber-100 border-2 border-amber-300 text-amber-700 text-xs font-bold tracking-wider uppercase">
@@ -659,8 +824,8 @@
         </div>
       </div>
 
-      <!-- SLIDE 9: Dashboard -->
-      <div class="slide hidden" id="slide-9">
+      <!-- SLIDE 10: Dashboard -->
+      <div class="slide hidden" id="slide-10">
         <div class="space-y-6 animate-in">
           <div class="space-y-3">
             <div class="inline-block px-4 py-2 rounded-lg text-xs font-bold tracking-wider uppercase" style="background-color:rgba(1,118,211,0.1);border:2px solid rgba(1,118,211,0.3);color:#0176d3">
@@ -723,14 +888,17 @@
                 <table class="w-full text-xs font-mono">
                   <thead>
                     <tr class="border-b-2 border-slate-200 bg-slate-50">
-                      <th class="text-left p-3 font-bold text-slate-600 uppercase tracking-wider">Account</th>
-                      <th class="text-left p-3 font-bold text-slate-600 uppercase tracking-wider">Segment</th>
-                      <th class="text-left p-3 font-bold text-slate-600 uppercase tracking-wider">Competitor</th>
-                      <th class="text-center p-3 font-bold text-slate-600 uppercase tracking-wider">Status</th>
-                      <th class="text-right p-3 font-bold text-slate-600 uppercase tracking-wider">Deal</th>
-                      <th class="text-center p-3 font-bold text-slate-600 uppercase tracking-wider">Usage</th>
-                      <th class="text-left p-3 font-bold text-slate-600 uppercase tracking-wider">Trend</th>
-                      <th class="text-left p-3 font-bold text-slate-600 uppercase tracking-wider">Renewal</th>
+                      <th class="text-left p-2.5 font-bold text-slate-600 uppercase tracking-wider">Account</th>
+                      <th class="text-left p-2.5 font-bold text-slate-600 uppercase tracking-wider">Seg</th>
+                      <th class="text-left p-2.5 font-bold text-slate-600 uppercase tracking-wider">Competitor</th>
+                      <th class="text-center p-2.5 font-bold text-slate-600 uppercase tracking-wider">Status</th>
+                      <th class="text-right p-2.5 font-bold text-slate-600 uppercase tracking-wider">Deal</th>
+                      <th class="text-center p-2.5 font-bold uppercase tracking-wider" style="color:#0176d3">Lic Util</th>
+                      <th class="text-center p-2.5 font-bold uppercase tracking-wider" style="color:#2e844a">Active</th>
+                      <th class="text-center p-2.5 font-bold uppercase tracking-wider" style="color:#d97706">Feature</th>
+                      <th class="text-center p-2.5 font-bold uppercase tracking-wider" style="color:#7c3aed">Combined</th>
+                      <th class="text-left p-2.5 font-bold text-slate-600 uppercase tracking-wider">Trend</th>
+                      <th class="text-left p-2.5 font-bold text-slate-600 uppercase tracking-wider">Renewal</th>
                     </tr>
                   </thead>
                   <tbody id="dashboard-table-body"></tbody>
@@ -777,8 +945,8 @@
         </div>
       </div>
 
-      <!-- SLIDE 10: Strategic Close -->
-      <div class="slide hidden" id="slide-10">
+      <!-- SLIDE 11: Strategic Close -->
+      <div class="slide hidden" id="slide-11">
         <div class="space-y-8 animate-in">
           <div class="space-y-4">
             <div class="inline-block px-4 py-2 rounded-lg text-xs font-bold tracking-wider uppercase" style="background-color:rgba(46,132,74,0.1);border:2px solid rgba(46,132,74,0.3);color:#2e844a">
@@ -806,8 +974,8 @@
         </div>
       </div>
 
-      <!-- SLIDE 11: Summary -->
-      <div class="slide hidden" id="slide-11">
+      <!-- SLIDE 12: Summary -->
+      <div class="slide hidden" id="slide-12">
         <div class="space-y-8 animate-in">
           <div class="space-y-4">
             <div class="inline-block px-4 py-2 rounded-lg text-xs font-bold tracking-wider uppercase" style="background-color:rgba(1,118,211,0.1);border:2px solid rgba(1,118,211,0.3);color:#0176d3">
@@ -930,7 +1098,7 @@
 <script>
 // Navigation
 let currentSlide = 0;
-const totalSlides = 12;
+const totalSlides = 13;
 
 function showSlide(n) {
   document.querySelectorAll('.slide').forEach((s, i) => {
@@ -984,10 +1152,10 @@ document.addEventListener('keydown', function(e) {
   });
 })();
 
-// Slide 3: Architecture steps
+// Slide 4: Architecture steps
 (function() {
   const steps = [
-    { num: '1', title: 'Extract', color: '#0176d3', items: ['Extract from Snowflake (existing EDW)', 'Store as raw tables \u2013 no transforms', 'Immutable audit trail preserved', '2 years of deal history + 2 years of usage snapshots'] },
+    { num: '1', title: 'Extract', color: '#0176d3', items: ['Extract from Azure EDW (raw landing zone)', 'Transform in Airflow \u2013 load to Snowflake', 'Immutable audit trail preserved', '2 years of deal history + 2 years of usage snapshots'] },
     { num: '2', title: 'QA + Integrity', color: '#c23934', items: ['Schema validation on every load', 'Range checks \u2013 flag invalid values', 'Dedup + format normalization', 'Quality gate \u2013 blocks bad data'] },
     { num: '3', title: 'Join', color: '#f59e0b', items: ['LEFT JOIN on Account_ID', 'NULLs retained \u2013 they are signals', 'Historical snapshot, not current state'], pointInTime: "We capture usage as of the deal\u2019s close date \u2013 not today. A churned customer\u2019s usage is now 0%, which tells us nothing. We need what it was when the deal was active." },
     { num: '4', title: 'Enrich', color: '#7c3aed', items: ['Usage tier: Low / Med / High', '12-month usage trend before loss', 'Days inactive + risk flag', 'Loss reason classification'] },
@@ -1053,13 +1221,13 @@ document.addEventListener('keydown', function(e) {
   });
 })();
 
-// Slide 4: Integrity issues + QA table
+// Slide 5: Integrity issues + QA table
 (function() {
   const issues = [
     { num: '1', title: 'Competitor Accuracy', desc: "Competitor is required at Stage 3 via the CI_Opportunity_Competitor junction (908-record catalog). The issue isn\u2019t missing data \u2014 it\u2019s accuracy. Reps pick the wrong competitor or default to the obvious name. One deal can have multiple competitors; the Leading flag tracks who actually won.", fix: '\u2192 Validate against CI_Competitor catalog. Build on the existing zero-shot classification to improve entity resolution. Flag deals where Leading competitor changed post-close. Cross-check with Competitive_Notes text.' },
     { num: '2', title: 'Duplicate Deal Records', desc: "Each deal has a unique Opportunity ID. But duplicates appear from: (a) field changes firing multiple events \u2014 rep updates Competitor 10 min after close, creating a second record; (b) same deal in both batch export and real-time stream. If 30 of 108 losses are dupes, the scorecard is wrong.", fix: '\u2192 Group by Opportunity ID, keep latest timestamp, discard the rest.' },
     { num: '3', title: 'Deriving Usage from Asset Hierarchy', desc: "Usage isn\u2019t a stored field \u2014 it\u2019s derived from Account \u2192 Asset Line Items (Apttus) \u2192 child usage objects. Need to build a composite metric (license util + active users + feature adoption) and validate for accounts where tracking isn\u2019t configured or assets are missing.", fix: '\u2192 Build the derivation as a transform step. Range-validate the composite output. NULL accounts with no asset data \u2014 flag in quality log.' },
-    { num: '4', title: 'Cross-System ID Resolution', desc: "Salesforce IDs are consistent within the CRM (15/18 char), but when tables from different source systems land in Snowflake, the same customer can appear with different identifiers. Joins fail silently.", fix: '\u2192 Standardize IDs at the Snowflake layer before any joins. Map external IDs to Salesforce Account_ID as the canonical key.' },
+    { num: '4', title: 'Cross-System ID Resolution', desc: "Salesforce IDs are consistent within the CRM (15/18 char), but when tables from different source systems land in Azure EDW, the same customer can appear with different identifiers. Joins fail silently.", fix: '\u2192 Standardize IDs in the Airflow transform layer before any joins. Map external IDs to Salesforce Account_ID as the canonical key.' },
   ];
   const container = document.getElementById('integrity-issues');
   issues.forEach(issue => {
@@ -1096,7 +1264,7 @@ document.addEventListener('keydown', function(e) {
   });
 })();
 
-// Slide 6: Chart bars
+// Slide 7: Chart bars
 (function() {
   const chartA = [90, 80, 65, 50, 35, 22, 18];
   const chartB = [22, 20, 22, 18, 21, 19, 20];
@@ -1115,7 +1283,7 @@ document.addEventListener('keydown', function(e) {
   renderBars('chart-c', chartC, v => v > 60 ? '#2e844a' : '#c23934');
 })();
 
-// Slide 7: Insights
+// Slide 8: Insights
 (function() {
   // Enrich tags
   const enrichTags = ['Usage Tier (Low/Med/High)', 'Days Inactive', 'Risk Flag', 'Loss Reason', '12-mo Trend'];
@@ -1165,7 +1333,7 @@ document.addEventListener('keydown', function(e) {
   });
 })();
 
-// Slide 8: Price Sensitive - In Control
+// Slide 9: Price Sensitive - In Control
 (function() {
   const items = [
     { title: 'Price undercut', tag: 'Pricing Team', tagColor: '#f59e0b', desc: "Competitor offered 30% less. Customer was happy with the product but the economics didn\u2019t work. If this is concentrated in Mid-Market, the pricing tier may be wrong for that segment." },
@@ -1185,7 +1353,7 @@ document.addEventListener('keydown', function(e) {
   });
 })();
 
-// Slide 9: Dashboard
+// Slide 10: Dashboard
 (function() {
   // KPIs
   const kpis = [
@@ -1245,17 +1413,26 @@ document.addEventListener('keydown', function(e) {
       </div>`;
   });
 
-  // Table
+  // Table — with 3 usage components + computed combined score
   const rows = [
-    { account: 'Nexus Corp', segment: 'Enterprise', competitor: 'Rival Co.', status: 'LOST', statusColor: 'red', deal: '$84K', usage: '18%', usageColor: 'red', trend: [90, 75, 60, 45, 30, 18], renewal: 'Jan 15', renewalColor: 'red' },
-    { account: 'Alpine Media', segment: 'Mid-Mkt', competitor: 'DataForce', status: 'LOST', statusColor: 'red', deal: '$120K', usage: '9%', usageColor: 'red', trend: [20, 18, 15, 12, 10, 9], renewal: 'Jan 22', renewalColor: 'red' },
-    { account: 'Orbit Labs', segment: 'Enterprise', competitor: 'Rival Co.', status: 'AT RISK', statusColor: 'amber', deal: '$92K', usage: '22%', usageColor: 'red', trend: [65, 60, 55, 50, 25, 22], renewal: 'Feb 01', renewalColor: 'amber' },
-    { account: 'Crestwood Inc', segment: 'SMB', competitor: 'Competo', status: 'WON', statusColor: 'green', deal: '$56K', usage: '71%', usageColor: 'green', trend: [60, 65, 68, 70, 72, 71], renewal: 'Mar 01', renewalColor: 'slate' },
+    { account: 'Nexus Corp', segment: 'Ent', competitor: 'Rival Co.', status: 'LOST', statusColor: 'red', deal: '$84K', licUtil: 24, activeRate: 9, featureAdopt: 15, trend: [90, 75, 60, 45, 30, 18], renewal: 'Jan 15', renewalColor: 'red' },
+    { account: 'Alpine Media', segment: 'Mid', competitor: 'DataForce', status: 'LOST', statusColor: 'red', deal: '$120K', licUtil: 14, activeRate: 6, featureAdopt: 4, trend: [20, 18, 15, 12, 10, 9], renewal: 'Jan 22', renewalColor: 'red' },
+    { account: 'Orbit Labs', segment: 'Ent', competitor: 'Rival Co.', status: 'AT RISK', statusColor: 'amber', deal: '$92K', licUtil: 32, activeRate: 17, featureAdopt: 10, trend: [65, 60, 55, 50, 25, 22], renewal: 'Feb 01', renewalColor: 'amber' },
+    { account: 'Crestwood Inc', segment: 'SMB', competitor: 'Competo', status: 'WON', statusColor: 'green', deal: '$56K', licUtil: 82, activeRate: 65, featureAdopt: 54, trend: [60, 65, 68, 70, 72, 71], renewal: 'Mar 01', renewalColor: 'slate' },
   ];
+
+  // Compute combined usage: (licUtil * 0.50) + (activeRate * 0.30) + (featureAdopt * 0.20)
+  function computeCombined(r) {
+    return Math.round(r.licUtil * 0.50 + r.activeRate * 0.30 + r.featureAdopt * 0.20);
+  }
+
+  function usageColor(v) { return v < 30 ? '#dc2626' : v < 60 ? '#d97706' : '#2e844a'; }
+  function usageBg(v) { return v < 30 ? 'rgba(239,68,68,0.08)' : v < 60 ? 'rgba(245,158,11,0.08)' : 'rgba(46,132,74,0.08)'; }
+
   const tbody = document.getElementById('dashboard-table-body');
   rows.forEach(r => {
+    const combined = computeCombined(r);
     const statusClasses = r.statusColor === 'red' ? 'background-color:#fee2e2;border:2px solid #fca5a5;color:#b91c1c' : r.statusColor === 'amber' ? 'background-color:#fef3c7;border:2px solid #fcd34d;color:#b45309' : 'background-color:rgba(46,132,74,0.1);border:2px solid rgba(46,132,74,0.3);color:#2e844a';
-    const usageColor = r.usageColor === 'red' ? '#dc2626' : '#2e844a';
     const renewalColor = r.renewalColor === 'red' ? '#dc2626' : r.renewalColor === 'amber' ? '#d97706' : '#475569';
     const trendBars = r.trend.map(v => {
       const c = v > 60 ? '#2e844a' : v > 30 ? '#f59e0b' : '#c23934';
@@ -1263,24 +1440,27 @@ document.addEventListener('keydown', function(e) {
     }).join('');
     tbody.innerHTML += `
       <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-        <td class="p-3 font-bold text-slate-900">${r.account}</td>
-        <td class="p-3 text-slate-600">${r.segment}</td>
-        <td class="p-3 text-slate-600">${r.competitor}</td>
-        <td class="text-center p-3"><span class="px-3 py-1 rounded-lg text-xs font-bold" style="${statusClasses}">${r.status}</span></td>
-        <td class="p-3 text-right font-bold text-slate-900">${r.deal}</td>
-        <td class="p-3 text-center font-bold" style="color:${usageColor}">${r.usage}</td>
-        <td class="p-3"><div class="flex items-end gap-1 h-6">${trendBars}</div></td>
-        <td class="p-3 font-bold" style="color:${renewalColor}">${r.renewal}</td>
+        <td class="p-2.5 font-bold text-slate-900">${r.account}</td>
+        <td class="p-2.5 text-slate-600">${r.segment}</td>
+        <td class="p-2.5 text-slate-600">${r.competitor}</td>
+        <td class="text-center p-2.5"><span class="px-2 py-0.5 rounded-lg text-[10px] font-bold" style="${statusClasses}">${r.status}</span></td>
+        <td class="p-2.5 text-right font-bold text-slate-900">${r.deal}</td>
+        <td class="p-2.5 text-center font-bold" style="color:${usageColor(r.licUtil)};background:${usageBg(r.licUtil)}">${r.licUtil}%</td>
+        <td class="p-2.5 text-center font-bold" style="color:${usageColor(r.activeRate)};background:${usageBg(r.activeRate)}">${r.activeRate}%</td>
+        <td class="p-2.5 text-center font-bold" style="color:${usageColor(r.featureAdopt)};background:${usageBg(r.featureAdopt)}">${r.featureAdopt}%</td>
+        <td class="p-2.5 text-center font-bold" style="color:white;background:${usageColor(combined)};border-radius:6px"><span style="text-shadow:0 1px 2px rgba(0,0,0,0.2)">${combined}%</span></td>
+        <td class="p-2.5"><div class="flex items-end gap-1 h-5">${trendBars}</div></td>
+        <td class="p-2.5 font-bold" style="color:${renewalColor}">${r.renewal}</td>
       </tr>`;
   });
 })();
 
-// Slide 10: Strategic Close
+// Slide 11: Strategic Close
 (function() {
   const stats = [
     { stat: '90 days', title: 'Predict Churn Before It Happens', desc: 'Usage drop below 30% triggers an automated CS alert 90 days before renewal. The pipeline turns a historical report into a forward-looking early warning system.', color: '#2e844a' },
     { stat: '2 signals', title: 'Separate Price Loss from Engagement Loss', desc: "Price loss vs engagement loss require completely different responses. Product team gets roadmap input. Pricing team gets segment analysis. Sales Ops gets CSM assignment data. One pipeline, three actionable briefs.", color: '#f59e0b' },
-    { stat: '~23%', title: 'Projected Reduction in Competitive Churn', desc: "Proactive CS engagement on the 340 at-risk accounts could protect $2.5\u20133M of the $4.2M ARR at risk\u2014based on comparable intervention programs.", color: '#0176d3' },
+    { stat: '~60%', title: 'Projected Save Rate on At-Risk Accounts', desc: "Proactive CS engagement on the 340 at-risk accounts could protect $2.5\u20133M of the $4.2M ARR at risk\u2014consistent with 60\u201370% save rates seen in early intervention programs.", color: '#0176d3' },
   ];
   const sContainer = document.getElementById('strategic-stats');
   stats.forEach(s => {
